@@ -1602,7 +1602,7 @@ async def connect(
     protocol_version,
     enable_debug,
     listener=None,
-    port=6669,
+    port=6668,
     timeout=5,
 ):
     """Connect to a device."""
