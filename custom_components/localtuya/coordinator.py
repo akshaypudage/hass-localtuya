@@ -69,6 +69,7 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
         self._fake_gateway = fake_gateway
         self._gateway: TuyaDevice = None
         self.sub_devices: dict[str, TuyaDevice] = {}
+        self.sub_device_online = True
 
         self._status = {}
         # Sleep timer, a device that reports the status every x seconds then goes into sleep.
@@ -199,7 +200,9 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
                 break  # Succeed break while loop
             except OSError as e:
                 await self.abort_connect()
-                if retry >= max_retries or e.errno == pytuya.errno.EHOSTUNREACH:
+                if (
+                    retry >= max_retries or e.errno == pytuya.errno.EHOSTUNREACH
+                ) and not self.is_sleep:
                     self.warning(f"Connection failed: {e}")
                     break
             except Exception as ex:  # pylint: disable=broad-except
@@ -505,9 +508,8 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
             return
 
         self._call_on_close.append(asyncio.create_task(self._async_reconnect()).cancel)
-        delay = (0 if self.is_subdevice else 3) + sleep_time
         fun = partial(self._shutdown_entities, exc=exc)
-        self._call_on_close.append(async_call_later(self._hass, delay, fun))
+        self._call_on_close.append(async_call_later(self._hass, 3 + sleep_time, fun))
 
     async def _async_reconnect(self):
         """Task: continuously attempt to reconnect to the device."""
@@ -518,6 +520,10 @@ class TuyaDevice(pytuya.TuyaListener, pytuya.ContextualLogger):
         attempts = 0
         while True and not self._is_closing:
             # for sub-devices, if the gateway isn't connected then no need for reconnect.
+            if self.is_subdevice and not self.sub_device_online:
+                self.warning(f"Sub deivce is offline")
+                await asyncio.sleep(10)
+                continue
             if self._gateway and (
                 not self._gateway.connected or self._gateway.is_connecting
             ):
