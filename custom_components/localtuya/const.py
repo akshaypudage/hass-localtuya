@@ -13,7 +13,7 @@ from homeassistant.const import (
     Platform,
 )
 
-DOMAIN = "localtuya_custom"
+DOMAIN = "localtuya"
 
 DATA_DISCOVERY = "discovery"
 
