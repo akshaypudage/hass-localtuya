@@ -414,7 +414,6 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
 
     async def async_set_temperature(self, **kwargs):
         """Set new target temperature."""
-        _LOGGER.error("H2")
         if ATTR_TEMPERATURE in kwargs and self.has_config(CONF_TARGET_TEMPERATURE_DP):
             temperature = kwargs[ATTR_TEMPERATURE]
 
@@ -453,7 +452,6 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
         self._previous_target_temperature = self.target_temperature
 
         if not self._state and self.hvac_mode == HVACMode.OFF:
-            _LOGGER.error("H1")
             await self._device.set_dp(True, self._dp_id)
             await asyncio.sleep(2)
         elif hvac_mode == HVACMode.OFF:
