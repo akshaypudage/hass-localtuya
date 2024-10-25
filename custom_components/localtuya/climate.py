@@ -414,6 +414,7 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
 
     async def async_set_temperature(self, **kwargs):
         """Set new target temperature."""
+        _LOGGER.error("H2")
         if ATTR_TEMPERATURE in kwargs and self.has_config(CONF_TARGET_TEMPERATURE_DP):
             temperature = kwargs[ATTR_TEMPERATURE]
 
@@ -445,12 +446,14 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
     async def async_set_hvac_mode(self, hvac_mode: HVACMode):
         """Set new target operation mode."""
         new_states = {}
+        requested_mode = hvac_mode
         _LOGGER.error("Requested Mode=", hvac_mode.value)
         _LOGGER.error("Current Mode=", self.hvac_mode)
         self._previous_hvac_mode = self.hvac_mode
         self._previous_target_temperature = self.target_temperature
 
         if not self._state and self.hvac_mode == HVACMode.OFF:
+            _LOGGER.error("H1")
             await self._device.set_dp(True, self._dp_id)
             await asyncio.sleep(2)
         elif hvac_mode == HVACMode.OFF:
@@ -462,7 +465,7 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
             return
         await self.turn_on_led()
         await asyncio.sleep(2)
-        key = self.get_key(mode = hvac_mode)
+        key = self.get_key(mode = requested_mode)
         _LOGGER.error("Setting key= ", key)
         data = self.get_ir_data(key)
         await self._device.set_dp("{\"head\":\"010ed80000000000040014003e00ab00ca\",\"key1\":{\"data\":\"" + data +"\",\"data_type\":0,\"key\":\"" + key + "\"},\"devid\":\"\",\"ver\":\"3\",\"delay\":300,\"control\":\"send_ir\",\"v_devid\":\"" + self._device.dev_id + "\",\"key_num\":1}\t", 201)
@@ -473,12 +476,12 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
 
     async def async_turn_on(self) -> None:
         """Turn the entity on."""
+        current_hvac_mode =self.dp_value(self._hvac_mode_dp)
         await self._device.set_dp(True, self._dp_id)
-        key = self.get_key(mode = self.hvac_mode, temperature = self.target_temperature)
+        key = self.get_key(mode = current_hvac_mode, temperature = self.target_temperature)
         data = self.get_ir_data(key)
         _LOGGER.error("Setting key= ", key)
         await self._device.set_dp("{\"head\":\"010ed80000000000040014003e00ab00ca\",\"key1\":{\"data\":\"" + data +"\",\"data_type\":0,\"key\":\"" + key + "\"},\"devid\":\"\",\"ver\":\"3\",\"delay\":300,\"control\":\"send_ir\",\"v_devid\":\"" + self._device.dev_id + "\",\"key_num\":1}\t", 201)
-
 
     async def async_turn_off(self) -> None:
         """Turn the entity off."""
@@ -560,6 +563,14 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
                     break
 
     def getMode(self, mode):
+        if mode == 'cold':
+            mode = 'cool'
+        elif mode == 'warm':
+            mode = 'heat'
+        elif mode == 'dehumidify':
+            mode = 'dry'
+        elif mode == 'air':
+            mode = 'fan_only'
         match mode:
             case 'cool':
                 return 0
