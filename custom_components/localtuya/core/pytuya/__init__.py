@@ -742,7 +742,7 @@ class TuyaListener(ABC):
         """Device disconnected."""
 
     @abstractmethod
-    def subdevice_state(self, state: SubdeviceState):
+    def subdevice_state_updated(self, state: SubdeviceState):
         """Device is offline or online."""
 
 
@@ -755,7 +755,7 @@ class EmptyListener(TuyaListener):
     def disconnected(self, exc=""):
         """Device disconnected."""
 
-    def subdevice_state(self, state: SubdeviceState):
+    def subdevice_state_updated(self, state: SubdeviceState):
         """Device is offline or online."""
 
 
@@ -811,7 +811,8 @@ class TuyaProtocol(asyncio.Protocol, ContextualLogger):
         self.remote_nonce = b""
         self.dps_whitelist = UPDATE_DPS_WHITELIST
         self.dispatched_dps = {}  # Store payload so we can trigger an event in HA.
-        self._last_command_sent = 1
+        self._last_command_sent = 1  # The time last command was sent
+        self._write_lock = asyncio.Lock()  # To serialize writes
         self.enable_debug(enable_debug)
 
     def set_version(self, protocol_version):
@@ -856,17 +857,13 @@ class TuyaProtocol(asyncio.Protocol, ContextualLogger):
                 listener = self.listener and self.listener()
                 if listener is None or (on_devs is None and off_devs is None):
                     return
-                # listener.sub_devices can be changed when an absent sub-device is removed from,
-                # or re-connected sub-deviceis added to it. Such an event causes
-                #     RuntimeError: dictionary changed size during iteration
-                subdevices = dict(listener.sub_devices)
-                for cid, device in subdevices.items():
+                for cid, device in listener.sub_devices.items():
                     if cid in on_devs:
-                        device.subdevice_state(SubdeviceState.ONLINE)
+                        device.subdevice_state_updated(SubdeviceState.ONLINE)
                     elif cid in off_devs:
-                        device.subdevice_state(SubdeviceState.OFFLINE)
+                        device.subdevice_state_updated(SubdeviceState.OFFLINE)
                     else:
-                        device.subdevice_state(SubdeviceState.ABSENT)
+                        device.subdevice_state_updated(SubdeviceState.ABSENT)
             except asyncio.CancelledError:
                 pass
 
@@ -1002,15 +999,12 @@ class TuyaProtocol(asyncio.Protocol, ContextualLogger):
 
     async def transport_write(self, data):
         """Write data on transport, ensure that no massive requests happen all at once."""
-        wait = 0
-        while self.last_command_sent < 0.050:
-            await asyncio.sleep(0.010)
-            wait += 1
-            if wait >= 10:
-                break
+        async with self._write_lock:
+            while self.last_command_sent < 0.050:
+                await asyncio.sleep(0.010)
 
-        self._last_command_sent = time.time()
-        self.transport.write(data)
+            self._last_command_sent = time.time()
+            self.transport.write(data)
 
     async def close(self):
         """Close connection and abort all outstanding listeners."""
@@ -1659,7 +1653,7 @@ async def connect(
             )
 
         raise ex
-    except Exception as ex:
+    except (Exception, asyncio.CancelledError) as ex:
         raise ex
     except:
         raise Exception(f"The host refused to connect")

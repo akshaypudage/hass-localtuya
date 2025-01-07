@@ -25,7 +25,7 @@ from homeassistant.const import (
     EVENT_HOMEASSISTANT_STOP,
     SERVICE_RELOAD,
 )
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_track_time_interval
 
@@ -46,8 +46,6 @@ from .const import (
 from .discovery import TuyaDiscovery
 
 _LOGGER = logging.getLogger(__name__)
-
-UNSUB_LISTENER = "unsub_listener"
 
 CONF_DP = "dp"
 CONF_VALUE = "value"
@@ -318,7 +316,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             hass, tuya_api.async_connect(), "localtuya-cloudAPI"
         )
 
-    hass_localtuya = HassLocalTuyaData(tuya_api, {}, [])
+    hass_localtuya = HassLocalTuyaData(tuya_api, {})
     hass.data[DOMAIN][entry.entry_id] = hass_localtuya
 
     def _setup_devices(entry_devices: dict):
@@ -362,29 +360,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     await async_remove_orphan_entities(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS.values())
 
-    hass_localtuya.unsub_listeners.append(entry.add_update_listener(update_listener))
+    # Note: entry.async_on_unload items are called in LIFO order!
 
     for dev in connect_to_devices:
         asyncio.create_task(dev.async_connect())
+        entry.async_on_unload(dev.close)
 
+    entry.async_on_unload(entry.add_update_listener(update_listener))
+
+    async def _shutdown(event):
+        """Clean up resources when shutting down."""
+        for dev in connect_to_devices:
+            await dev.close()
+        _LOGGER.info("Shutdown completed")
+
+    entry.async_on_unload(
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _shutdown)
+    )
+
+    entry.async_on_unload(_run_async_listen(hass, entry))
+    _LOGGER.info("Setup completed")
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unloading the Tuya platforms."""
-    hass_data: HassLocalTuyaData = hass.data[DOMAIN][entry.entry_id]
-
-    # Unsub listeners.
-    [unsub() for unsub in hass_data.unsub_listeners]
-
-    for dev in hass_data.devices.values():
-        asyncio.create_task(dev.close())
-
     # Unload the platforms.
     await hass.config_entries.async_unload_platforms(entry, PLATFORMS.values())
-
     hass.data[DOMAIN].pop(entry.entry_id)
 
+    _LOGGER.info("Unload completed")
     return True
 
 
@@ -397,7 +402,7 @@ async def async_remove_config_entry_device(
     hass: HomeAssistant, config_entry: ConfigEntry, device_entry: dr.DeviceEntry
 ) -> bool:
     """Remove a config entry from a device."""
-    dev_id = list(device_entry.identifiers)[0][1].split("_")[-1]
+    dev_id = _device_id_by_identifiers(device_entry.identifiers)
 
     ent_reg = er.async_get(hass)
     entities = {
@@ -450,8 +455,76 @@ async def async_remove_orphan_entities(hass, entry):
         ent_reg.async_remove(entity_id)
 
 
+def _run_async_listen(hass: HomeAssistant, entry: ConfigEntry):
+    """Start the listing events"""
+
+    @callback
+    def _event_filtter(data: dr.EventDeviceRegistryUpdatedData) -> bool:
+        device_reg = dr.async_get(hass).async_get(data["device_id"])
+        is_entry = device_reg and entry.entry_id in device_reg.config_entries
+        return data["action"] == "update" and is_entry
+
+    async def device_state_changed(event: Event[dr.EventDeviceRegistryUpdatedData]):
+        """Close connection if device disabled."""
+        if not "disabled_by" in event.data["changes"]:
+            return
+
+        device_registry = dr.async_get(hass).async_get(event.data["device_id"])
+
+        hass_localtuya: HassLocalTuyaData = hass.data[DOMAIN][entry.entry_id]
+
+        dev_id = _device_id_by_identifiers(device_registry.identifiers)
+        host_ip = entry.data[CONF_DEVICES][dev_id][CONF_HOST]
+
+        if cid := entry.data[CONF_DEVICES][dev_id].get(CONF_NODE_ID):
+            host_ip = f"{host_ip}_{cid}"
+
+        device = hass_localtuya.devices.get(host_ip)
+
+        if device and device_registry.disabled:
+            # If this is a gateway or fake gateway then reload entry to start using another device as GW.
+            if device.sub_devices or (device.gateway and device.gateway.id == dev_id):
+                await hass.config_entries.async_reload(entry.entry_id)
+            else:
+                await device.close()
+
+    return hass.bus.async_listen(
+        dr.EVENT_DEVICE_REGISTRY_UPDATED, device_state_changed, _event_filtter
+    )
+
+
+def _device_id_by_identifiers(identifiers: set[tuple[str, str]]):
+    """Return localtuya device ID by device registry identifiers."""
+    return list(identifiers)[0][1].split("_")[-1]
+
+
 @callback
-def check_if_device_disabled(hass: HomeAssistant, entry: ConfigEntry, dev_id):
+def async_config_entry_by_device_id(hass: HomeAssistant, device_id: str):
+    """Look up config entry by device id."""
+    current_entries = hass.config_entries.async_entries(DOMAIN)
+    for entry in current_entries:
+        if device_id in entry.data[CONF_DEVICES]:
+            return entry
+        # Search for gateway_id
+        for dev_conf in entry.data[CONF_DEVICES].values():
+            if (gw_id := dev_conf.get(CONF_GATEWAY_ID)) and gw_id == device_id:
+                return entry
+    return None
+
+
+@callback
+def async_device_id_by_entity_id(hass: HomeAssistant, entity_id: str):
+    """Look up config entry by device id."""
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    if device := dev_reg.async_get(ent_reg.async_get(entity_id).device_id):
+        return list(device.identifiers)[0][1].split("_")[-1]
+
+    return None
+
+
+@callback
+def check_if_device_disabled(hass: HomeAssistant, entry: ConfigEntry, dev_id: str):
     """Return whether if the device disabled or not."""
     ent_reg = er.async_get(hass)
     entries = er.async_entries_for_config_entry(ent_reg, entry.entry_id)
@@ -464,17 +537,3 @@ def check_if_device_disabled(hass: HomeAssistant, entry: ConfigEntry, dev_id):
 
     if ha_device_id and (device := dr.async_get(hass).async_get(ha_device_id)):
         return device.disabled
-
-
-@callback
-def async_config_entry_by_device_id(hass: HomeAssistant, device_id):
-    """Look up config entry by device id."""
-    current_entries = hass.config_entries.async_entries(DOMAIN)
-    for entry in current_entries:
-        if device_id in entry.data[CONF_DEVICES]:
-            return entry
-        # Search for gateway_id
-        for dev_conf in entry.data[CONF_DEVICES].values():
-            if (gw_id := dev_conf.get(CONF_GATEWAY_ID)) and gw_id == device_id:
-                return entry
-    return None

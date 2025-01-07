@@ -20,7 +20,7 @@ from homeassistant.helpers.selector import (
     SelectOptionDict,
 )
 import voluptuous as vol
-from homeassistant import config_entries, core, exceptions
+from homeassistant import exceptions
 from homeassistant.const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
@@ -39,7 +39,8 @@ from homeassistant.const import (
     CONF_USERNAME,
     EntityCategory,
 )
-from homeassistant.core import callback
+from homeassistant.core import callback, HomeAssistant
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 
 from .coordinator import pytuya, TuyaCloudApi
 from .core.cloud_api import TUYA_ENDPOINTS
@@ -94,7 +95,7 @@ DEVICE_CLOUD_DATA = "device_cloud_data"
 CONFIGURE_MENU = [CONF_ADD_DEVICE, CONF_EDIT_DEVICE, CONF_CONFIGURE_CLOUD]
 
 
-def _col_to_select(
+def col_to_select(
     opt_list: dict | list, multi_select=False, is_dps=False, custom_value=False
 ) -> SelectSelector:
     """Convert collections to SelectSelectorConfig."""
@@ -129,7 +130,7 @@ def _col_to_select(
 
 CLOUD_CONFIGURE_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_REGION, default="eu"): _col_to_select(TUYA_ENDPOINTS),
+        vol.Required(CONF_REGION, default="eu"): col_to_select(TUYA_ENDPOINTS),
         vol.Optional(CONF_CLIENT_ID): cv.string,
         vol.Optional(CONF_CLIENT_SECRET): cv.string,
         vol.Optional(CONF_USER_ID): cv.string,
@@ -144,7 +145,7 @@ DEVICE_SCHEMA = vol.Schema(
         vol.Required(CONF_HOST): cv.string,
         vol.Required(CONF_DEVICE_ID): cv.string,
         vol.Required(CONF_LOCAL_KEY): cv.string,
-        vol.Required(CONF_PROTOCOL_VERSION, default="auto"): _col_to_select(
+        vol.Required(CONF_PROTOCOL_VERSION, default="auto"): col_to_select(
             ["auto"] + sorted(SUPPORTED_PROTOCOL_VERSIONS)
         ),
         vol.Required(CONF_ENABLE_DEBUG, default=False): bool,
@@ -157,7 +158,7 @@ DEVICE_SCHEMA = vol.Schema(
 )
 
 PICK_ENTITY_SCHEMA = vol.Schema(
-    {vol.Required(PLATFORM_TO_ADD, default="switch"): _col_to_select(PLATFORMS)}
+    {vol.Required(PLATFORM_TO_ADD, default="switch"): col_to_select(PLATFORMS)}
 )
 
 
@@ -166,11 +167,10 @@ MASS_CONFIGURE_SCHEMA = {vol.Optional(CONF_MASS_CONFIGURE, default=False): bool}
 CUSTOM_DEVICE = {"Add Device Manually": "..."}
 
 
-class LocaltuyaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class LocaltuyaConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for LocalTuya integration."""
 
     VERSION = ENTRIES_VERSION
-    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
 
     @staticmethod
     @callback
@@ -235,12 +235,11 @@ class LocaltuyaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
-class LocalTuyaOptionsFlowHandler(config_entries.OptionsFlow):
+class LocalTuyaOptionsFlowHandler(OptionsFlow):
     """Handle options flow for LocalTuya integration."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry):
+    def __init__(self, config_entry: ConfigEntry):
         """Initialize localtuya options flow."""
-        self.config_entry = config_entry
         self._entry_id = config_entry.entry_id
 
         self.selected_device = None
@@ -455,8 +454,10 @@ class LocalTuyaOptionsFlowHandler(config_entries.OptionsFlow):
                     )
                     if self.device_data.pop(EXPORT_CONFIG, False):
                         dev_config = self.config_entry.data[CONF_DEVICES][dev_id].copy()
-                        templates.export_config(
-                            dev_config, self.device_data[CONF_FRIENDLY_NAME]
+                        await self.hass.async_add_executor_job(
+                            templates.export_config,
+                            dev_config,
+                            self.device_data[CONF_FRIENDLY_NAME],
                         )
                         return self.async_create_entry(title="", data={})
                     # We will restore device details if it's already existed!
@@ -468,6 +469,9 @@ class LocalTuyaOptionsFlowHandler(config_entries.OptionsFlow):
                         if rm_conf in user_input and user_input[rm_conf] in ["-", " "]:
                             self.device_data.pop(rm_conf)
 
+                    self.dps_strings = merge_dps_manual_strings(
+                        self.device_data.get(CONF_MANUAL_DPS, ""), self.dps_strings
+                    )
                     if self.device_data.pop(CONF_ENABLE_ADD_ENTITIES, False):
                         self.editing_device = False
                         user_input[CONF_DEVICE_ID] = dev_id
@@ -684,7 +688,9 @@ class LocalTuyaOptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             self.use_template = True
             filename = user_input.get(TEMPLATES)
-            _config = templates.import_config(filename)
+            _config = await self.hass.async_add_executor_job(
+                templates.import_config, filename
+            )
             dev_conf = self.device_data
             dev_conf[CONF_ENTITIES] = _config
             dev_conf[CONF_DPS_STRINGS] = self.dps_strings
@@ -695,9 +701,11 @@ class LocalTuyaOptionsFlowHandler(config_entries.OptionsFlow):
             self.template_device = self.device_data
             self.editing_device = True
             return await self.async_step_configure_device()
-        templates_list = templates.list_templates()
+        templates_list = await self.hass.async_add_executor_job(
+            templates.list_templates
+        )
         schema = vol.Schema(
-            {vol.Required(TEMPLATES): _col_to_select(templates_list, custom_value=True)}
+            {vol.Required(TEMPLATES): col_to_select(templates_list, custom_value=True)}
         )
         return self.async_show_form(step_id="choose_template", data_schema=schema)
 
@@ -866,7 +874,7 @@ class EmptyDpsList(exceptions.HomeAssistantError):
 
 
 async def setup_localtuya_devices(
-    hass: config_entries.HomeAssistant,
+    hass: HomeAssistant,
     entry_id: str,
     discovered_devices: dict,
     devices_cloud_data: dict,
@@ -993,7 +1001,7 @@ def devices_schema(
 
     schema = vol.Schema(
         {
-            vol.Required(SELECTED_DEVICE): _col_to_select(devices),
+            vol.Required(SELECTED_DEVICE): col_to_select(devices),
         }
     )
 
@@ -1047,7 +1055,7 @@ def options_schema(entities):
             vol.Required(CONF_FRIENDLY_NAME): cv.string,
             vol.Required(CONF_HOST): cv.string,
             vol.Required(CONF_LOCAL_KEY): cv.string,
-            vol.Required(CONF_PROTOCOL_VERSION, default="3.3"): _col_to_select(
+            vol.Required(CONF_PROTOCOL_VERSION, default="3.3"): col_to_select(
                 sorted(SUPPORTED_PROTOCOL_VERSIONS)
             ),
             vol.Required(CONF_ENABLE_DEBUG, default=False): bool,
@@ -1058,7 +1066,7 @@ def options_schema(entities):
             vol.Required(
                 CONF_ENTITIES, description={"suggested_value": entity_names}
             ): cv.multi_select(entity_names),
-            # _col_to_select(entity_names, multi_select=True)
+            # col_to_select(entity_names, multi_select=True)
             vol.Required(CONF_ENABLE_ADD_ENTITIES, default=False): bool,
             vol.Optional(EXPORT_CONFIG, default=False): bool,
         }
@@ -1110,28 +1118,49 @@ def gen_dps_strings():
     return [f"{dp} (value: ?)" for dp in range(1, 256)]
 
 
+def strip_dps_values(user_input, dps_strings):
+    """Remove values and keep only index for DPS config items."""
+    stripped = {}
+    for field, value in user_input.items():
+        if value in dps_strings:
+            stripped[field] = int(user_input[field].split(" ")[0])
+        else:
+            stripped[field] = user_input[field]
+    return stripped
+
+
+def merge_dps_manual_strings(manual_dps: list, dps_strings: list):
+    """Split manual_dps by comma and assign -1 as default value. Return merged with dps string."""
+    manual_list = []
+    avaliable_dps = [dp.split(" ")[0] for dp in dps_strings]
+
+    for dp in manual_dps.split(","):
+        dp = dp.strip()
+        if dp.isdigit() and dp not in avaliable_dps and dp != "0":
+            manual_list.append(f"{dp} ( value: -1 )")
+
+    return sorted(dps_strings + manual_list, key=lambda i: int(i.split(" ")[0]))
+
+
 async def platform_schema(
-    hass: core.HomeAssistant, platform, dps_strings, allow_id=True, yaml=False
+    hass: HomeAssistant, platform, dps_strings, allow_id=True, yaml=False
 ):
     """Generate input validation schema for a platform."""
     # decide default value of device by platform.
     schema = {}
     if yaml:
         # In YAML mode we force the specified platform to match flow schema
-        schema[vol.Required(CONF_PLATFORM)] = _col_to_select([platform])
+        schema[vol.Required(CONF_PLATFORM)] = col_to_select([platform])
     if allow_id:
-        schema[vol.Required(CONF_ID)] = _col_to_select(dps_strings, is_dps=True)
+        schema[vol.Required(CONF_ID)] = col_to_select(dps_strings, is_dps=True)
     schema[vol.Optional(CONF_FRIENDLY_NAME, default="")] = vol.Any(None, cv.string)
     schema[
         vol.Required(CONF_ENTITY_CATEGORY, default=str(default_category(platform)))
-    ] = _col_to_select(ENTITY_CATEGORY)
+    ] = col_to_select(ENTITY_CATEGORY)
 
-    try:  # requires HA >= 2024.3 -> Later this will be remove and update HACS version requirement.
-        plat_schema = await hass.async_add_import_executor_job(
-            flow_schema, platform, dps_strings
-        )
-    except AttributeError:
-        plat_schema = flow_schema(platform, dps_strings)
+    plat_schema = await hass.async_add_import_executor_job(
+        flow_schema, platform, dps_strings
+    )
 
     return vol.Schema(schema).extend(plat_schema)
 
@@ -1154,18 +1183,7 @@ def flow_schema(platform, dps_strings):
     return import_module("." + platform, integration_module).flow_schema(dps_strings)
 
 
-def strip_dps_values(user_input, dps_strings):
-    """Remove values and keep only index for DPS config items."""
-    stripped = {}
-    for field, value in user_input.items():
-        if value in dps_strings:
-            stripped[field] = int(user_input[field].split(" ")[0])
-        else:
-            stripped[field] = user_input[field]
-    return stripped
-
-
-async def validate_input(hass: core.HomeAssistant, entry_id, data):
+async def validate_input(hass: HomeAssistant, entry_id, data):
     """Validate the user input allows us to connect."""
     logger = pytuya.ContextualLogger()
     logger.set_logger(_LOGGER, data[CONF_DEVICE_ID], True, data[CONF_FRIENDLY_NAME])

@@ -6,7 +6,7 @@ import re
 import asyncio
 import logging
 from functools import partial
-from .config_flow import _col_to_select
+from .config_flow import col_to_select
 from homeassistant.helpers import selector
 
 import voluptuous as vol
@@ -99,11 +99,25 @@ HVAC_ACTION_SETS = {
     HVACAction.HEATING: "opened",
     HVACAction.IDLE: "closed",
 }
+from enum import StrEnum
 
 
-TEMPERATURE_CELSIUS = "celsius"
-TEMPERATURE_FAHRENHEIT = "fahrenheit"
-DEFAULT_TEMPERATURE_UNIT = TEMPERATURE_CELSIUS
+class SupportedTemps(StrEnum):
+    C = "celsius"
+    F = "fahrenheit"
+    C_F = f"celsius/fahrenheit"
+    F_C = f"fahrenheit/celsius"
+
+
+SUPPORTED_TEMPERATURES = {
+    UnitOfTemperature.CELSIUS: SupportedTemps.C,
+    UnitOfTemperature.FAHRENHEIT: SupportedTemps.F,
+    f"Target Temperature: {UnitOfTemperature.CELSIUS} | Current Temperature {UnitOfTemperature.FAHRENHEIT}": SupportedTemps.C_F,
+    f"Target Temperature: {UnitOfTemperature.FAHRENHEIT} | Current Temperature {UnitOfTemperature.CELSIUS}": SupportedTemps.F_C,
+}
+SUPPORTED_PRECISIONS = [0.01, PRECISION_TENTHS, PRECISION_HALVES, PRECISION_WHOLE]
+
+DEFAULT_TEMPERATURE_UNIT = SupportedTemps.C
 DEFAULT_PRECISION = 0.1
 DEFAULT_TEMPERATURE_STEP = PRECISION_HALVES
 # Empirically tested to work for AVATTO thermostat
@@ -115,79 +129,52 @@ FAN_SPEEDS_DEFAULT = "auto,low,middle,high"
 def flow_schema(dps):
     """Return schema used in config flow."""
     return {
-        vol.Optional(CONF_TARGET_TEMPERATURE_DP): _col_to_select(dps, is_dps=True),
-        vol.Optional(CONF_CURRENT_TEMPERATURE_DP): _col_to_select(dps, is_dps=True),
-        vol.Optional(CONF_TEMPERATURE_STEP): _col_to_select(
+        vol.Optional(CONF_TARGET_TEMPERATURE_DP): col_to_select(dps, is_dps=True),
+        vol.Optional(CONF_CURRENT_TEMPERATURE_DP): col_to_select(dps, is_dps=True),
+        vol.Optional(CONF_TEMPERATURE_STEP): col_to_select(
             [PRECISION_WHOLE, PRECISION_HALVES, PRECISION_TENTHS]
         ),
         vol.Optional(CONF_MIN_TEMP, default=DEFAULT_MIN_TEMP): vol.Coerce(float),
         vol.Optional(CONF_MAX_TEMP, default=DEFAULT_MAX_TEMP): vol.Coerce(float),
-        vol.Optional(CONF_PRECISION, default=str(DEFAULT_PRECISION)): _col_to_select(
-            [PRECISION_WHOLE, PRECISION_HALVES, PRECISION_TENTHS]
+        vol.Optional(CONF_PRECISION, default=str(DEFAULT_PRECISION)): col_to_select(
+            SUPPORTED_PRECISIONS
         ),
         vol.Optional(
             CONF_TARGET_PRECISION, default=str(DEFAULT_PRECISION)
-        ): _col_to_select([PRECISION_WHOLE, PRECISION_HALVES, PRECISION_TENTHS]),
-        vol.Optional(CONF_HVAC_MODE_DP): _col_to_select(dps, is_dps=True),
+        ): col_to_select(SUPPORTED_PRECISIONS),
+        vol.Optional(CONF_HVAC_MODE_DP): col_to_select(dps, is_dps=True),
         vol.Optional(
             CONF_HVAC_MODE_SET, default=HVAC_MODE_SETS
         ): selector.ObjectSelector(),
-        vol.Optional(CONF_HVAC_ACTION_DP): _col_to_select(dps, is_dps=True),
+        vol.Optional(CONF_HVAC_ACTION_DP): col_to_select(dps, is_dps=True),
         vol.Optional(
             CONF_HVAC_ACTION_SET, default=HVAC_ACTION_SETS
         ): selector.ObjectSelector(),
-        vol.Optional(CONF_ECO_DP): _col_to_select(dps, is_dps=True),
+        vol.Optional(CONF_ECO_DP): col_to_select(dps, is_dps=True),
         vol.Optional(CONF_ECO_VALUE): str,
-        vol.Optional(CONF_PRESET_DP): _col_to_select(dps, is_dps=True),
+        vol.Optional(CONF_PRESET_DP): col_to_select(dps, is_dps=True),
         vol.Optional(CONF_PRESET_SET, default={}): selector.ObjectSelector(),
-        vol.Optional(CONF_FAN_SPEED_DP): _col_to_select(dps, is_dps=True),
+        vol.Optional(CONF_FAN_SPEED_DP): col_to_select(dps, is_dps=True),
         vol.Optional(CONF_FAN_SPEED_LIST, default=FAN_SPEEDS_DEFAULT): str,
-        vol.Optional(CONF_TEMPERATURE_UNIT): _col_to_select(
-            [TEMPERATURE_CELSIUS, TEMPERATURE_FAHRENHEIT]
-        ),
+        vol.Optional(CONF_TEMPERATURE_UNIT): col_to_select(SUPPORTED_TEMPERATURES),
         vol.Optional(CONF_HEURISTIC_ACTION): bool,
     }
 
 
 # Convertors
 def f_to_c(num):
-    return (num - 32) * 5 / 9
+    return (num - 32) * 5 / 9 if num else num
 
 
 def c_to_f(num):
-    return (num * 1.8) + 32
+    return (num * 1.8) + 32 if num else num
 
 
 def config_unit(unit):
-    if unit == TEMPERATURE_FAHRENHEIT:
+    if unit == SupportedTemps.F:
         return UnitOfTemperature.FAHRENHEIT
     else:
         return UnitOfTemperature.CELSIUS
-
-
-def convert_temperature(num_1, num_2) -> tuple[float, float]:
-    """Take two values and compare them. If one is in Fahrenheit, Convert it to Celsius."""
-    if None in (num_1, num_2):
-        return num_1, num_2
-
-    def perc_diff(value1, value2):
-        """Return the percentage difference between two values"""
-        max_value, min_value = max(value1, value2), min(value1, value2)
-        try:
-            return abs((max_value - min_value) / min_value) * 100
-        except ZeroDivisionError:
-            return 0
-
-    # Check if one value is in Celsius and the other is in Fahrenheit
-    if perc_diff(num_1, num_2) > 160:
-        fahrenheit = max(num_1, num_2)
-        to_celsius = (fahrenheit - 32) * 5 / 9
-        if fahrenheit == num_1:
-            num_1 = to_celsius
-        elif fahrenheit == num_2:
-            num_2 = to_celsius
-
-    return num_1, num_2
 
 
 class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
@@ -264,7 +251,7 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
         self._max_temp = self._config.get(CONF_MAX_TEMP, DEFAULT_MAX_TEMP)
 
         # Temperture unit
-        self._temperature_unit = config_unit(self._config.get(CONF_TEMPERATURE_UNIT))
+        self._temperature_unit = UnitOfTemperature.CELSIUS
 
     @property
     def supported_features(self):
@@ -277,11 +264,8 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
         if self._has_fan_mode:
             supported_features |= ClimateEntityFeature.FAN_MODE
 
-        try:  # requires HA >= 2024.2.1
-            supported_features |= ClimateEntityFeature.TURN_OFF
-            supported_features |= ClimateEntityFeature.TURN_ON
-        except AttributeError:
-            ...
+        supported_features |= ClimateEntityFeature.TURN_OFF
+        supported_features |= ClimateEntityFeature.TURN_ON
 
         return supported_features
 
@@ -514,21 +498,22 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
             self._current_temperature = current_dp_temp * self._precision
 
         # Force the Current temperature and Target temperature to matching the unit.
-        target_temp, current_temperature = convert_temperature(
-            self._target_temperature, self._current_temperature
-        )
+        config_temp_unit = self._config.get(CONF_TEMPERATURE_UNIT, "")
+        target_unit, *current_unit = config_temp_unit.split("/")
 
-        # if target temperature converted to celsius, then convert all related values to set temperature.
-        if target_temp and target_temp != self._target_temperature:
-            self._target_temperature = target_temp
-            self._current_temperature = current_temperature
-
-            if not self._target_temp_forced_to_celsius:
-                self._target_temp_forced_to_celsius = True
-                self._min_temp = f_to_c(self._min_temp)
-                self._max_temp = f_to_c(self._max_temp)
-            if self._hass.config.units == US_CUSTOMARY_SYSTEM:
-                self._temperature_unit = UnitOfTemperature.CELSIUS
+        if current_unit:
+            set_temp_unit = UnitOfTemperature.CELSIUS
+            if target_unit == SupportedTemps.F:
+                self._target_temperature = f_to_c(self._target_temperature)
+                if not self._target_temp_forced_to_celsius:
+                    self._target_temp_forced_to_celsius = True
+                    self._min_temp = f_to_c(self._min_temp)
+                    self._max_temp = f_to_c(self._max_temp)
+            else:
+                self._current_temperature = f_to_c(self._current_temperature)
+        else:
+            set_temp_unit = config_unit(config_temp_unit)
+        self._temperature_unit = set_temp_unit
 
         # Update preset states
         if self._has_presets:

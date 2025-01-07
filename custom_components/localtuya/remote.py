@@ -8,7 +8,7 @@ from functools import partial
 import struct
 from enum import StrEnum
 from typing import Any, Iterable
-from .config_flow import _col_to_select
+from .config_flow import col_to_select
 
 import voluptuous as vol
 from homeassistant.components.remote import (
@@ -64,10 +64,10 @@ SOTRAGE_KEY = "localtuya_remotes_codes"
 def flow_schema(dps):
     """Return schema used in config flow."""
     return {
-        vol.Optional(
-            CONF_RECEIVE_DP, default=RemoteDP.DP_RECIEVE.value
-        ): _col_to_select(dps, is_dps=True),
-        vol.Optional(CONF_KEY_STUDY_DP): _col_to_select(dps, is_dps=True),
+        vol.Optional(CONF_RECEIVE_DP, default=RemoteDP.DP_RECIEVE.value): col_to_select(
+            dps, is_dps=True
+        ),
+        vol.Optional(CONF_KEY_STUDY_DP): col_to_select(dps, is_dps=True),
     }
 
 
@@ -89,6 +89,7 @@ class LocalTuyaRemote(LocalTuyaEntity, RemoteEntity):
         self._dp_key_study = self._config.get(CONF_KEY_STUDY_DP)
 
         self._device_id = self._device_config.id
+        self._lock = asyncio.Lock()
 
         # self._attr_activity_list: list = []
         # self._attr_current_activity: str | None = None
@@ -181,43 +182,50 @@ class LocalTuyaRemote(LocalTuyaEntity, RemoteEntity):
         if not self._storage_loaded:
             await self._async_load_storage()
 
-        for command in commands:
-            last_code = self._last_code
-            await self.send_signal(ControlMode.STUDY)
-            persistent_notification.async_create(
-                self.hass,
-                f"Press the '{command}' button.",
-                title="Learn command",
-                notification_id="learn_command",
-            )
+        if self._lock.locked():
+            return self.debug("The device is already in learning mode.")
 
-            try:
-                self.debug(f"Waiting for code from DP: {self._dp_recieve}")
-                while now < timeout:
-                    if last_code != (dp_code := self.dp_value(self._dp_recieve)):
-                        self._last_code = dp_code
-                        sucess = True
-                        await self.send_signal(ControlMode.STUDY_EXIT)
-                        break
-
-                    now += 1
-                    await asyncio.sleep(1)
-
-                if not sucess:
-                    await self.send_signal(ControlMode.STUDY_EXIT)
-                    raise ServiceValidationError(f"Failed to learn: {command}")
-
-            finally:
-                persistent_notification.async_dismiss(
-                    self.hass, notification_id="learn_command"
+        async with self._lock:
+            for command in commands:
+                last_code = self._last_code
+                await self.send_signal(ControlMode.STUDY)
+                persistent_notification.async_create(
+                    self.hass,
+                    f"Press the '{command}' button.",
+                    title="Learn command",
+                    notification_id="learn_command",
                 )
 
-            # code retrive sucess and it's sotred in self._last_code
-            # we will store the codes.
-            await self._save_new_command(device, command, self._last_code)
+                try:
+                    self.debug(f"Waiting for code from DP: {self._dp_recieve}")
+                    while now < timeout:
+                        if (
+                            last_code != (dp_code := self.dp_value(self._dp_recieve))
+                            and dp_code is not None
+                        ):
+                            self._last_code = dp_code
+                            sucess = True
+                            await self.send_signal(ControlMode.STUDY_EXIT)
+                            break
 
-            if command != commands[-1]:
-                await asyncio.sleep(1)
+                        now += 1
+                        await asyncio.sleep(1)
+
+                    if not sucess:
+                        await self.send_signal(ControlMode.STUDY_EXIT)
+                        raise ServiceValidationError(f"Failed to learn: {command}")
+
+                finally:
+                    persistent_notification.async_dismiss(
+                        self.hass, notification_id="learn_command"
+                    )
+
+                # code retrive sucess and it's sotred in self._last_code
+                # we will store the codes.
+                await self._save_new_command(device, command, self._last_code)
+
+                if command != commands[-1]:
+                    await asyncio.sleep(1)
 
     async def async_delete_command(self, **kwargs: Any) -> None:
         """Delete commands from the database."""
