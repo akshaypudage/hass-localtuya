@@ -4,11 +4,11 @@ import asyncio
 import errno
 import logging
 import time
+import copy
 from importlib import import_module
 from functools import partial
 from collections.abc import Coroutine
 from typing import Any
-from copy import deepcopy
 
 
 import homeassistant.helpers.config_validation as cv
@@ -21,6 +21,8 @@ from homeassistant.helpers.selector import (
 )
 import voluptuous as vol
 from homeassistant import exceptions
+from homeassistant.core import callback, HomeAssistant
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
@@ -39,11 +41,10 @@ from homeassistant.const import (
     CONF_USERNAME,
     EntityCategory,
 )
-from homeassistant.core import callback, HomeAssistant
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 
-from .coordinator import pytuya, TuyaCloudApi
-from .core.cloud_api import TUYA_ENDPOINTS
+from .coordinator import HassLocalTuyaData
+from .core import pytuya
+from .core.cloud_api import TUYA_ENDPOINTS, TuyaCloudApi
 from .core.helpers import templates, get_gateway_by_deviceid, gen_localtuya_entities
 from .const import (
     ATTR_UPDATED_AT,
@@ -191,7 +192,7 @@ class LocaltuyaConfigFlow(ConfigFlow, domain=DOMAIN):
                     user_input[i] = ""
                 return await self._create_entry(user_input)
 
-            cloud_api, res = await attempt_cloud_connection(self.hass, user_input)
+            cloud_api, res = await attempt_cloud_connection(user_input)
 
             if not res:
                 return await self._create_entry(user_input)
@@ -208,7 +209,7 @@ class LocaltuyaConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=schema_defaults(CLOUD_CONFIGURE_SCHEMA, **defaults),
+            data_schema=schema_suggested_values(CLOUD_CONFIGURE_SCHEMA, **defaults),
             errors=errors,
             description_placeholders=placeholders,
         )
@@ -254,7 +255,13 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
         self.use_template = False
         self.template_device = None
 
-        self.cloud_data: TuyaCloudApi
+    @property
+    def localtuya_data(self) -> HassLocalTuyaData:
+        return self.hass.data[DOMAIN][self._entry_id]
+
+    @property
+    def cloud_data(self) -> TuyaCloudApi:
+        return self.localtuya_data.cloud_data
 
     async def async_step_init(self, user_input=None):
         """Manage basic options."""
@@ -263,9 +270,7 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
         if not self.config_entry.data[CONF_DEVICES]:
             configure_menu.pop(configure_menu.index(CONF_EDIT_DEVICE))
 
-        self.cloud_data = self.hass.data[DOMAIN][self._entry_id].cloud_data
-        if not self.config_entry.data.get(CONF_NO_CLOUD):
-            # Refresh devices List data.
+        if not self.config_entry.data.get(CONF_NO_CLOUD, True):
             self.hass.async_create_task(self.cloud_data.async_get_devices_list())
 
         return self.async_show_menu(step_id="init", menu_options=configure_menu)
@@ -284,7 +289,7 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
 
                 return self._update_entry(new_data, new_title=username)
 
-            cloud_api, res = await attempt_cloud_connection(self.hass, user_input)
+            cloud_api, res = await attempt_cloud_connection(user_input)
 
             if not res:
                 new_data = self.config_entry.data.copy()
@@ -306,7 +311,7 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
 
         return self.async_show_form(
             step_id="configure_cloud",
-            data_schema=schema_defaults(CLOUD_CONFIGURE_SCHEMA, **defaults),
+            data_schema=schema_suggested_values(CLOUD_CONFIGURE_SCHEMA, **defaults),
             errors=errors,
             description_placeholders=placeholders,
         )
@@ -323,9 +328,10 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
 
             if user_input.pop(CONF_MASS_CONFIGURE, False):
                 # Handle auto configure all recognized devices.
+                await self.cloud_data.async_get_devices_dps_query()
                 devices, fails = await setup_localtuya_devices(
                     self.hass,
-                    self.config_entry.entry_id,
+                    self.localtuya_data,
                     self.discovered_devices,
                     self.cloud_data.device_list,
                     log_fails=True,
@@ -337,14 +343,16 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
                     for fail_dev in fails.values():
                         devices_fails += f"\n{fail_dev['name']}: {fail_dev['reason']}"
 
-                    msg = f"Sucessed devices: ``{len(devices)}``\n ```{devices_sucessed}\n```"
+                    msg = f"Succeeded devices: ``{len(devices)}``\n ```{devices_sucessed}\n```"
                     if fails:
                         msg += f" \n Failed devices: ``{len(fails)}``\n ```{devices_fails}\n```"
+                    msg += "\nClick on submit to add the devices"
 
                     return await self.async_step_confirm(
                         msg=msg,
-                        confirm_callback=self._update_entry,
-                        callback_args=(devices, CONF_DEVICES),
+                        confirm_callback=lambda: self._update_entry(
+                            devices, CONF_DEVICES
+                        ),
                     )
 
             return await self.async_step_configure_device()
@@ -460,14 +468,11 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
                             self.device_data[CONF_FRIENDLY_NAME],
                         )
                         return self.async_create_entry(title="", data={})
+
                     # We will restore device details if it's already existed!
                     for res_conf in [CONF_GATEWAY_ID, CONF_MODEL, CONF_PRODUCT_KEY]:
                         if dev_config.get(res_conf):
                             self.device_data[res_conf] = dev_config.get(res_conf)
-                    # Remove the values that assigned as "- or empty space"
-                    for rm_conf in [CONF_RESET_DPIDS, CONF_MANUAL_DPS]:
-                        if rm_conf in user_input and user_input[rm_conf] in ["-", " "]:
-                            self.device_data.pop(rm_conf)
 
                     self.dps_strings = merge_dps_manual_strings(
                         self.device_data.get(CONF_MANUAL_DPS, ""), self.dps_strings
@@ -512,9 +517,7 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
                         ]
                         return await self.async_step_configure_entity()
 
-                valid_data = await validate_input(
-                    self.hass, self.config_entry.entry_id, user_input
-                )
+                valid_data = await validate_input(self.localtuya_data, user_input)
                 self.dps_strings = valid_data[CONF_DPS_STRINGS]
                 # We will also get protocol version from valid date in case auto used.
                 self.device_data[CONF_PROTOCOL_VERSION] = valid_data[
@@ -529,7 +532,7 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
                 errors["base"] = "invalid_auth"
             except EmptyDpsList:
                 errors["base"] = "empty_dps"
-            except (OSError, ValueError, pytuya.DecodeError) as ex:
+            except (OSError, ValueError, pytuya.parser.DecodeError) as ex:
                 _LOGGER.debug("Unexpected exception: %s", ex)
                 placeholders["ex"] = str(ex)
                 errors["base"] = "unknown"
@@ -567,7 +570,7 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
                         placeholders = {
                             "for_device": f" for sub-device `{dev_id}.\nNodeID {self.nodeID}.{note}`"
                         }
-            schema = schema_defaults(options_schema(self.entities), **defaults)
+            schema = schema_suggested_values(options_schema(self.entities), **defaults)
         else:
             # user_in will restore input if an error occurred instead of clears all fields.
             user_in = user_input or {}
@@ -593,7 +596,7 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
                 defaults[CONF_LOCAL_KEY] = cloud_devs[dev_id].get(CONF_LOCAL_KEY)
                 defaults[CONF_FRIENDLY_NAME] = cloud_devs[dev_id].get(CONF_NAME)
 
-            schema = schema_defaults(DEVICE_SCHEMA, **defaults)
+            schema = schema_suggested_values(DEVICE_SCHEMA, **defaults)
 
             placeholders["for_device"] = ""
 
@@ -610,7 +613,7 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
         errors = {}
         placeholders = {}
 
-        # Gather the informations
+        # Gather the information
         is_cloud = not self.config_entry.data.get(CONF_NO_CLOUD)
         dev_id = self.selected_device
         category = None
@@ -726,9 +729,7 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
         return self.async_show_form(
             step_id="entity",
             errors=errors,
-            data_schema=schema_defaults(
-                schema, self.dps_strings, **self.current_entity
-            ),
+            data_schema=schema_suggested_values(schema, **self.current_entity),
             description_placeholders={
                 "id": int(self.current_entity[CONF_ID]),
                 "platform": self.current_entity[CONF_PLATFORM],
@@ -750,7 +751,7 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
                     dev_id = self.device_data[CONF_DEVICE_ID]
                     new_data = self.config_entry.data.copy()
                     entry_id = self.config_entry.entry_id
-                    # Removing the unwanted entites.
+                    # Removing the unwanted entities.
                     entitesNames = [
                         name.get(CONF_FRIENDLY_NAME)
                         for name in self.device_data[CONF_ENTITIES]
@@ -780,7 +781,7 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
             schema = await platform_schema(
                 self.hass, self.current_entity[CONF_PLATFORM], self.dps_strings, False
             )
-            schema = schema_defaults(schema, self.dps_strings, **self.current_entity)
+            schema = schema_suggested_values(schema, **self.current_entity)
             placeholders = {
                 "entity": f"entity with DP {int(self.current_entity[CONF_ID])}",
                 "platform": self.current_entity[CONF_PLATFORM],
@@ -802,18 +803,10 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
             description_placeholders=placeholders,
         )
 
-    async def async_step_confirm(
-        self,
-        msg: str,
-        confirm_callback: Coroutine = None,
-        callback_args: tuple[Any, ...] | None = None,
-    ):
+    async def async_step_confirm(self, msg: str, confirm_callback: Coroutine = None):
         """Create a confirmation config flow page. If submitted, the `confirm_callback` will be called."""
         if confirm_callback:
-            if callback_args:
-                self._confirm_callback = partial(confirm_callback, *callback_args)
-            else:
-                self._confirm_callback = confirm_callback
+            self._confirm_callback = confirm_callback
 
         placeholders = {}
         placeholders["message"] = msg
@@ -833,7 +826,7 @@ class LocalTuyaOptionsFlowHandler(OptionsFlow):
     @callback
     def _update_entry(self, new_data, target_obj="", new_title=""):
         """Update entry data and save etnry,"""
-        _data = deepcopy(dict(self.config_entry.data))
+        _data = copy.deepcopy(dict(self.config_entry.data))
         if target_obj:
             _data[target_obj].update(new_data)
         else:
@@ -875,7 +868,7 @@ class EmptyDpsList(exceptions.HomeAssistantError):
 
 async def setup_localtuya_devices(
     hass: HomeAssistant,
-    entry_id: str,
+    localtuya_data: HassLocalTuyaData,
     discovered_devices: dict,
     devices_cloud_data: dict,
     log_fails=False,
@@ -925,20 +918,19 @@ async def setup_localtuya_devices(
             devices_cfg.append(device_data)
 
     # Connect to the devices to ensure the are usable.
-    validate_devices = [validate_input(hass, entry_id, dev) for dev in devices_cfg]
+    validate_devices = [validate_input(localtuya_data, dev) for dev in devices_cfg]
     results = await asyncio.gather(*validate_devices, return_exceptions=True)
 
     # Merge test results with devices config
-    for i in range(len(results)):
-        dev_id = devices_cfg[i].get(CONF_DEVICE_ID)
-        if not isinstance(results[i], dict):
-            update_fails(dev_id, results[i])
+    for dev_cfg, result in zip(devices_cfg, results):
+        dev_id = dev_cfg.get(CONF_DEVICE_ID)
+        if not isinstance(result, dict):
+            update_fails(dev_id, result)
             continue
-
-        devices.update({dev_id: {**devices_cfg[i], **results[i]}})
+        devices.update({dev_id: {**dev_cfg, **result}})
 
     # Configure entities.
-    for dev_id, dev_data in deepcopy(devices).items():
+    for dev_id, dev_data in copy.deepcopy(devices).items():
         category = devices_cloud_data[dev_id].get("category")
         dev_data[DEVICE_CLOUD_DATA] = devices_cloud_data[dev_id]
         if category and (dps_strings := dev_data.get(CONF_DPS_STRINGS, False)):
@@ -950,7 +942,7 @@ async def setup_localtuya_devices(
             update_fails(dev_id, f"no configured entities: {dev_entites} - {category}")
             continue
 
-        # Add configured entiteis
+        # Add configured entities
         devices[dev_id].update({CONF_ENTITIES: dev_entites})
 
     return devices, fails
@@ -1073,24 +1065,20 @@ def options_schema(entities):
     )
 
 
-def schema_defaults(schema, dps_list=None, **defaults):
-    """Create a new schema with default values filled in."""
-    copy = schema.extend({})
-    for field, field_type in copy.schema.items():
-        if isinstance(field_type, vol.In):
-            value = None
-            for dps in dps_list or []:
-                if dps.startswith(f"{defaults.get(field)} "):
-                    value = dps
-                    break
+def schema_suggested_values(schema: vol.Schema, **defaults):
+    """Returns a copy of the schema with suggested values added to field descriptions."""
+    new_schema = {}
+    for field, field_type in schema.schema.items():
+        new_field = copy.copy(field)
 
-            if value in field_type.container:
-                field.default = vol.default_factory(value)
-                continue
+        # We don't want to overwrite existing suggested values.
+        if field.schema in defaults and (
+            not field.description or "suggested_value" not in field.description
+        ):
+            new_field.description = {"suggested_value": defaults[field]}
 
-        if field.schema in defaults:
-            field.default = vol.default_factory(defaults[field])
-    return copy
+        new_schema[new_field] = field_type
+    return vol.Schema(new_schema)
 
 
 def dps_string_list(dps_data: dict[str, dict], cloud_dp_codes: dict[str, dict]) -> list:
@@ -1100,8 +1088,8 @@ def dps_string_list(dps_data: dict[str, dict], cloud_dp_codes: dict[str, dict]) 
     # Merge DPs that found through cloud with local.
     for dp, func in cloud_dp_codes.items():
         # Default Manual dp value is -1, we will replace it if it in cloud.
-        add_dp = dp not in dps_data or dps_data.get(dp) == -1
-        if add_dp and ((value := func.get("value")) or value is not None):
+        if dp not in dps_data or dps_data.get(dp) == -1:
+            value = func.get("value", "")
             dps_data[dp] = f"{value}, cloud pull"
 
     for dp, value in dps_data.items():
@@ -1183,7 +1171,7 @@ def flow_schema(platform, dps_strings):
     return import_module("." + platform, integration_module).flow_schema(dps_strings)
 
 
-async def validate_input(hass: HomeAssistant, entry_id, data):
+async def validate_input(entry_runtime: HassLocalTuyaData, data):
     """Validate the user input allows us to connect."""
     logger = pytuya.ContextualLogger()
     logger.set_logger(_LOGGER, data[CONF_DEVICE_ID], True, data[CONF_FRIENDLY_NAME])
@@ -1197,7 +1185,7 @@ async def validate_input(hass: HomeAssistant, entry_id, data):
     bypass_handshake = False  # In-case device is passive.
 
     cid = data.get(CONF_NODE_ID, None)
-    localtuya_devices = hass.data[DOMAIN][entry_id].devices
+    localtuya_devices = entry_runtime.devices
     try:
         conf_protocol = data[CONF_PROTOCOL_VERSION]
         auto_protocol = conf_protocol == "auto"
@@ -1215,18 +1203,17 @@ async def validate_input(hass: HomeAssistant, entry_id, data):
             for ver in SUPPORTED_PROTOCOL_VERSIONS:
                 try:
                     version = ver if auto_protocol else conf_protocol
-                    interface = await asyncio.wait_for(
-                        pytuya.connect(
+                    logger.info(f"Connecting with protocol version: {version}")
+                    async with asyncio.timeout(5):
+                        interface = await pytuya.connect(
                             data[CONF_HOST],
                             data[CONF_DEVICE_ID],
                             data[CONF_LOCAL_KEY],
                             float(version),
                             data[CONF_ENABLE_DEBUG],
-                        ),
-                        5,
-                    )
-
-                    detected_dps = await interface.detect_available_dps(cid=cid)
+                        )
+                        logger.info(f"Connected attempt to detect the device DPS")
+                        detected_dps = await interface.detect_available_dps(cid=cid)
 
                     # Break the loop if input isn't auto.
                     if not auto_protocol:
@@ -1235,29 +1222,28 @@ async def validate_input(hass: HomeAssistant, entry_id, data):
                     # If Auto: using DPS detected we will assume this is the correct version if dps found.
                     if len(detected_dps) > 0:
                         # Set the conf_protocol to the worked version to return it and update self.device_data.
+                        logger.info(f"Detected DPS: {detected_dps}")
                         conf_protocol = version
                         break
 
                 # If connection to host is failed raise wrong address.
-                except (OSError, ValueError, pytuya.DecodeError) as ex:
+                except (OSError, ValueError) as ex:
+                    logger.error(f"Connection failed! {ex}")
                     error = ex
                     break
                 except:
                     continue
                 finally:
                     if not auto_protocol and data.get(CONF_DEVICE_SLEEP_TIME, 0) > 0:
+                        logger.info("Low-power device configured — handshake skipped")
                         bypass_connection = True
                     if not error and not interface:
                         error = InvalidAuth
 
-        if CONF_RESET_DPIDS in data:
-            reset_ids_str = data[CONF_RESET_DPIDS].split(",")
-            reset_ids = []
-            for reset_id in reset_ids_str:
-                reset_ids.append(int(reset_id.strip()))
-            logger.debug(
-                "Reset DPIDs configured: %s (%s)", data[CONF_RESET_DPIDS], reset_ids
-            )
+        if conf_reset_dpids := data.get(CONF_RESET_DPIDS):
+            reset_ids_str = conf_reset_dpids.split(",")
+            reset_ids = [int(reset_id.strip()) for reset_id in reset_ids_str]
+            logger.info("Reset DPIDs configured: %s (%s)", conf_reset_dpids, reset_ids)
         try:
             # If reset dpids set - then assume reset is needed before status.
             if (reset_ids is not None) and (len(reset_ids) > 0):
@@ -1272,14 +1258,14 @@ async def validate_input(hass: HomeAssistant, entry_id, data):
             if not detected_dps:
                 detected_dps = await interface.detect_available_dps(cid=cid)
 
-        except (ValueError, pytuya.DecodeError) as ex:
+        except (ValueError, pytuya.parser.DecodeError) as ex:
             error = ex
         except Exception as ex:
-            logger.debug(f"No DPS able to be detected {ex}")
+            logger.info(f"No DPS able to be detected {ex}")
             detected_dps = {}
 
         # if manual DPs are set, merge these.
-        # detected_dps_device used to pervent user from bypass handshake manual dps.
+        # detected_dps_device used to prevent user from bypass handshake manual dps.
         detected_dps_device = detected_dps.copy()
         logger.debug("Detected DPS: %s", detected_dps)
         if CONF_MANUAL_DPS in data:
@@ -1299,7 +1285,7 @@ async def validate_input(hass: HomeAssistant, entry_id, data):
 
     except (ConnectionRefusedError, ConnectionResetError) as ex:
         raise CannotConnect from ex
-    except (OSError, ValueError, pytuya.DecodeError) as ex:
+    except (OSError, ValueError, pytuya.parser.DecodeError) as ex:
         error = ex
     finally:
         if interface and close:
@@ -1307,15 +1293,15 @@ async def validate_input(hass: HomeAssistant, entry_id, data):
 
     # Get DP descriptions from the cloud, if the device is there.
     cloud_dp_codes = {}
-    cloud_data: TuyaCloudApi = hass.data[DOMAIN][entry_id].cloud_data
-    if device_cloud_data := cloud_data.device_list.get(data[CONF_DEVICE_ID]):
-        cloud_dp_codes = device_cloud_data.get("dps_data", {})
+    cloud_data = entry_runtime.cloud_data
+    if (dev_id := data.get(CONF_DEVICE_ID)) in cloud_data.device_list:
+        cloud_dp_codes = await cloud_data.async_get_device_functions(dev_id)
 
     # Indicate an error if no datapoints found as the rest of the flow
     # won't work in this case
     if not bypass_connection and error:
         raise error
-    # If bypass handshake. otherwise raise faild to make handshake with device.
+    # If bypass handshake. otherwise raise failed to make handshake with device.
     # --- Cloud: We will use the DPS found on cloud if exists.
     # --- No cloud: user will have to input the DPS manually.
     if not detected_dps_device and not (
@@ -1323,17 +1309,16 @@ async def validate_input(hass: HomeAssistant, entry_id, data):
     ):
         raise EmptyDpsList
 
-    logger.debug("Total DPS: %s", detected_dps)
+    logger.info("Total DPS: %s", detected_dps)
     return {
         CONF_DPS_STRINGS: dps_string_list(detected_dps, cloud_dp_codes),
         CONF_PROTOCOL_VERSION: conf_protocol,
     }
 
 
-async def attempt_cloud_connection(hass, user_input):
+async def attempt_cloud_connection(user_input):
     """Create device."""
     cloud_api = TuyaCloudApi(
-        hass,
         user_input.get(CONF_REGION),
         user_input.get(CONF_CLIENT_ID),
         user_input.get(CONF_CLIENT_SECRET),

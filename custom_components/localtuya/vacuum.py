@@ -7,19 +7,13 @@ from .config_flow import col_to_select
 import voluptuous as vol
 from homeassistant.components.vacuum import (
     DOMAIN,
-    STATE_CLEANING,
-    STATE_DOCKED,
-    STATE_ERROR,
-    STATE_IDLE,
-    STATE_PAUSED,
-    STATE_RETURNING,
-    VacuumEntityFeature,
     StateVacuumEntity,
+    VacuumActivity,
+    VacuumEntityFeature,
 )
 
 from .entity import LocalTuyaEntity, async_setup_entry
 from .const import (
-    CONF_BATTERY_DP,
     CONF_CLEAN_AREA_DP,
     CONF_CLEAN_RECORD_DP,
     CONF_CLEAN_TIME_DP,
@@ -50,7 +44,7 @@ FAULT = "fault"
 
 DEFAULT_IDLE_STATUS = "standby,sleep"
 DEFAULT_RETURNING_STATUS = "docking,to_charge,goto_charge"
-DEFAULT_DOCKED_STATUS = "charging,chargecompleted,charge_done"
+DEFAULT_DOCKED_STATUS = "charging,chargecompleted,charge_done,charging_dock"
 DEFAULT_MODES = "smart,wall_follow,spiral,single"
 DEFAULT_FAN_SPEEDS = "low,normal,high"
 DEFAULT_PAUSED_STATE = "paused"
@@ -70,7 +64,6 @@ def flow_schema(dps):
         vol.Optional(CONF_PAUSED_STATE, default=DEFAULT_PAUSED_STATE): str,
         vol.Optional(CONF_STOP_STATUS, default=DEFAULT_STOP_STATUS): str,
         vol.Optional(CONF_PAUSE_DP): col_to_select(dps, is_dps=True),
-        vol.Optional(CONF_BATTERY_DP): col_to_select(dps, is_dps=True),
         vol.Optional(CONF_MODE_DP): col_to_select(dps, is_dps=True),
         vol.Optional(CONF_MODES, default=DEFAULT_MODES): str,
         vol.Optional(CONF_RETURN_MODE, default=DEFAULT_RETURN_MODE): str,
@@ -91,7 +84,6 @@ class LocalTuyaVacuum(LocalTuyaEntity, StateVacuumEntity):
         """Initialize a new LocalTuyaVacuum."""
         super().__init__(device, config_entry, switchid, _LOGGER, **kwargs)
         self._state = None
-        self._battery_level = None
         self._attrs = {}
 
         self._idle_status_list = []
@@ -141,22 +133,15 @@ class LocalTuyaVacuum(LocalTuyaEntity, StateVacuumEntity):
             supported_features |= VacuumEntityFeature.RETURN_HOME
         if self.has_config(CONF_FAN_SPEED_DP):
             supported_features |= VacuumEntityFeature.FAN_SPEED
-        if self.has_config(CONF_BATTERY_DP):
-            supported_features |= VacuumEntityFeature.BATTERY
         if self.has_config(CONF_LOCATE_DP):
             supported_features |= VacuumEntityFeature.LOCATE
 
         return supported_features
 
     @property
-    def state(self):
+    def activity(self) -> VacuumActivity | None:
         """Return the vacuum state."""
         return self._state
-
-    @property
-    def battery_level(self):
-        """Return the current battery level."""
-        return self._battery_level
 
     @property
     def extra_state_attributes(self):
@@ -227,25 +212,22 @@ class LocalTuyaVacuum(LocalTuyaEntity, StateVacuumEntity):
 
     def status_updated(self):
         """Device status was updated."""
-        state_value = str(self.dp_value(self._dp_id))
+        state_value = self.dp_value(self._dp_id)
 
-        if state_value == "None":
+        if state_value is None:
             self._state = None
         elif state_value in self._idle_status_list:
-            self._state = STATE_IDLE
+            self._state = VacuumActivity.IDLE
         elif state_value in self._docked_status_list:
-            self._state = STATE_DOCKED
+            self._state = VacuumActivity.DOCKED
         elif state_value in self._returning_status_list:
-            self._state = STATE_RETURNING
+            self._state = VacuumActivity.RETURNING
         elif state_value in [self._config[CONF_PAUSED_STATE], "pause"] or (
-            not state_value and self.dp_value(CONF_PAUSE_DP) is True
+            self.dp_value(CONF_PAUSE_DP) is True
         ):
-            self._state = STATE_PAUSED
+            self._state = VacuumActivity.PAUSED
         else:
-            self._state = STATE_CLEANING
-
-        if self.has_config(CONF_BATTERY_DP):
-            self._battery_level = self.dp_value(CONF_BATTERY_DP)
+            self._state = VacuumActivity.CLEANING
 
         self._cleaning_mode = ""
         if self.has_config(CONF_MODES):
@@ -268,7 +250,7 @@ class LocalTuyaVacuum(LocalTuyaEntity, StateVacuumEntity):
         if self.has_config(CONF_FAULT_DP):
             self._attrs[FAULT] = self.dp_value(CONF_FAULT_DP)
             if self._attrs[FAULT] != 0:
-                self._state = STATE_ERROR
+                self._state = VacuumActivity.ERROR
 
 
 async_setup_entry = partial(async_setup_entry, DOMAIN, LocalTuyaVacuum, flow_schema)

@@ -10,13 +10,12 @@ on:
   push:
     workflow_dispatch:
     branches:
-      - master  # Adjust this to the branch you want to track
+      - master
 
 permissions:
   contents: write
 
 env:
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   release_commits: |
       {"section": "breaking_changes",    "prefix": "break",    "header": "💥 Breaking Changes"}
       {"section": "fixes",               "prefix": "fix",      "header": "🐛 Fixes"           }
@@ -58,9 +57,9 @@ jobs:
 
           declare -A cache_nickname;
           while IFS= read -r line; do
-                    commit_hash=$(echo $line | awk '{print $1}')
-                    author_info=$(echo $line | awk -F"by @" '{print (NF>1)? $NF : ""}'| awk '{print $1}')
-                    IFS=',' read -r name email mail_name <<< "$author_info"
+                    author_info=$(echo "$line" | grep -oP 'by @\K.*?(?= in)')
+                    commit=$(echo "$line" | grep -oP '/commit/\K[a-f0-9]+')
+                    IFS=$',' read -r name email mail_name _ <<< "$author_info"
 
                     if [[ "$email" != *"noreply"* ]]; then
                       if [[ -v cache_nickname[$email] ]]; then
@@ -68,9 +67,9 @@ jobs:
                       else
                         username=$(curl --silent --fail \
                                   -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-                                  "https://api.github.com/search/users?q=$email+in:email" \
-                                  | jq -r '.items[0].login')
-                                  cache_nickname[$email]=$username
+                                  "https://api.github.com/search/commits?q=$commit" \
+                                  | jq -r '.items[0].author.login')
+                        cache_nickname[$email]=$username
                       fi
                       if [[ $username != null ]]; then
                         sed -i "s#$author_info#$username#g" "commits.md"
@@ -85,11 +84,11 @@ jobs:
                     sed -i "s#$author_info#$username#g" "commits.md"
           done < commits.md
 
-          
       - name: Parse commit messages and categorize
         id: parse_commits
         run: |
           declare -A commits_map;
+
           while IFS= read -r line; do
             first_lower=$(echo "$line" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
             scope=$(echo "$line" | cut -d' ' -f1)
@@ -102,23 +101,27 @@ jobs:
               section=$(echo "$item"  | jq -r '.section')
               prefix=$(echo "$item"   | jq -r '.prefix')
 
-              if [[ "$first_lower" == $prefix*: ]]; then
+              if [[ "$first_lower" == $prefix* ]]; then
                 commits_map[$section]+=$parsed_commit && added=true && break
               fi
             done < <(echo '${{env.release_commits}}')
             [[ $added == false ]] && commits_map["more"]+=$parsed_commit
 
           done < commits.md
-
+          
+          jq -n '{}' commitsJson > tempJson && mv tempJson commitsJson
           for key in "${!commits_map[@]}"; do
-            echo "$key=${commits_map[$key]}" >> $GITHUB_OUTPUT
+            jq --arg key "$key" --arg value "${commits_map[$key]}" \
+              '. + {($key): $value}' commitsJson > tempJson && mv tempJson commitsJson
           done
-
 
       - name: Create Release Notes
         id: release-notes
         run: |
           notes="#### 🚨 **Note**: This draft has been released in $(date +'%Y.%m.%d - %H:%M:%S')\n\n"
+
+          integration_version=$(jq -r '.version' custom_components/localtuya/manifest.json)
+          notes+="### 🏷️ **Version**: $integration_version\n\n"
 
           while read -r item; do
             section=$(echo "$item"  | jq -r '.section') && [[ ! "$section" =~ [^[:space:]] ]] && continue
@@ -126,18 +129,20 @@ jobs:
 
             [[ ! "$section" =~ [^[:space:]] ]] && continue
 
-            section_commits=$(echo '${{ toJson(steps.parse_commits.outputs) }}' | jq -r ".$section")
-
+            section_commits=$(jq -r --arg k "$section" '.[$k]' commitsJson)
             if [ -n "$section_commits" ] && [ "$section_commits" != null ]; then
               notes+="### $header \n $section_commits \n"
             fi
+
           done < <(echo '${{env.release_commits}}')
 
-          echo -e $notes > commits.md
+          set -f; echo -e $notes > commits.md; set +f
 
       - name: Remove old Draft
         id: remove_drafts
         continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run:
           gh release delete "Draft Latest version"
 

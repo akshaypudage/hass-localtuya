@@ -1,6 +1,7 @@
 """
     This a file contains available tuya data
     https://developer.tuya.com/en/docs/iot/standarddescription?id=K9i5ql6waswzq
+
     Credits: official HA Tuya integration.
     Modified by: xZetsubou
 """
@@ -128,6 +129,42 @@ BUTTONS: dict[str, tuple[LocalTuyaEntity, ...]] = {
             entity_category=EntityCategory.CONFIG,
         ),
     ),
+    # Smart Pet Feeder
+    # https://developer.tuya.com/en/docs/iot/categorycwwsq?id=Kaiuz2b6vydld
+    "cwwsq": (
+        LocalTuyaEntity(
+            id=DPCode.FACTORY_RESET,
+            name="Factory Reset",
+            icon="mdi:cog-counterclockwise",
+            entity_category=EntityCategory.CONFIG,
+        ),
+    ),
+    # Smart Pet Feeder
+    # https://developer.tuya.com/en/docs/iot/categorycwwsq?id=Kaiuz2b6vydld
+    "cwwsq": (
+        LocalTuyaEntity(
+            id=DPCode.FACTORY_RESET,
+            name="Factory Reset",
+            icon="mdi:cog-counterclockwise",
+            entity_category=EntityCategory.CONFIG,
+        ),
+    ),
+    # Cat litter box
+    # https://developer.tuya.com/en/docs/iot/f?id=Kakg309qkmuit
+    "msp": (
+        LocalTuyaEntity(
+            id=DPCode.FACTORY_RESET,
+            name="Factory Reset",
+            icon="mdi:restore",
+            entity_category=EntityCategory.CONFIG,
+        ),
+        LocalTuyaEntity(
+            id=DPCode.REBOOT,
+            name="Reboot",
+            icon="mdi:restart",
+            entity_category=EntityCategory.CONFIG,
+        ),
+    ),
     # Robot Vacuum
     # https://developer.tuya.com/en/docs/iot/fsd?id=K9gf487ck1tlo
     "sd": (
@@ -177,6 +214,34 @@ BUTTONS: dict[str, tuple[LocalTuyaEntity, ...]] = {
             name="Clear Energy",
             icon="mdi:lightning-bolt-circle",
             entity_category=EntityCategory.CONFIG,
+        ),
+    ),
+    # EV Charcher
+    # https://developer.tuya.com/en/docs/iot/categoryqn?id=Kaiuz18kih0sm
+    "qccdz": (
+        LocalTuyaEntity(
+            id=DPCode.CLEAR_ENERGY,
+            name="Clear Energy",
+            icon="mdi:lightning-bolt-circle",
+            entity_category=EntityCategory.CONFIG,
+        ),
+    ),
+    # Lawn mower
+    "gcj": (
+        LocalTuyaEntity(
+            id=DPCode.CLEARAPPOINTMENT,
+            name="Clear schedule",
+            icon="mdi:calendar-remove-outline",
+        ),
+        LocalTuyaEntity(
+            id=DPCode.QUERYAPPOINTMENT,
+            name="Query schedule",
+            icon="mdi:calendar-search-outline",
+        ),
+        LocalTuyaEntity(
+            id=DPCode.QUERYPARTITION,
+            name="Query zones",
+            icon="mdi:map-search-outline",
         ),
     ),
 }

@@ -48,6 +48,13 @@ FAULT_SENSOR = (
         custom_configs=ON_1,
     ),
     LocalTuyaEntity(
+        id=DPCode.MACHINEERROR,
+        name="Fault",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        custom_configs=ON_1,
+    ),
+    LocalTuyaEntity(
         id=DPCode.IDU_ERROR,
         name="IDU Error",
         device_class=BinarySensorDeviceClass.PROBLEM,
@@ -80,6 +87,24 @@ FAULT_SENSOR = (
 
 
 BINARY_SENSORS: dict[str, tuple[LocalTuyaEntity, ...]] = {
+    # Fan
+    # https://developer.tuya.com/en/docs/iot/categoryfs?id=Kaiuz1xweel1c
+    "fs": (
+        LocalTuyaEntity(
+            id=DPCode.ERRO,  # codespell:ignore
+            name="Error",
+            device_class=BinarySensorDeviceClass.PROBLEM,
+            entity_category=EntityCategory.DIAGNOSTIC,
+            custom_configs=ON_1,
+        ),
+        LocalTuyaEntity(
+            id=DPCode.USB_BZ,
+            name="USB",
+            device_class=BinarySensorDeviceClass.PLUG,
+            entity_category=EntityCategory.DIAGNOSTIC,
+            custom_configs=STATE_TRUE,
+        ),
+    ),
     # Multi-functional Sensor
     # https://developer.tuya.com/en/docs/iot/categorydgnbj?id=Kaiuz3yorvzg3
     "dgnbj": (
@@ -201,6 +226,7 @@ BINARY_SENSORS: dict[str, tuple[LocalTuyaEntity, ...]] = {
             icon="mdi:information",
             custom_configs=ON_FEEDING,
         ),
+        *FAULT_SENSOR,
     ),
     # Human Presence Sensor
     # https://developer.tuya.com/en/docs/iot/categoryhps?id=Kaiuz42yhn1hs
@@ -245,6 +271,35 @@ BINARY_SENSORS: dict[str, tuple[LocalTuyaEntity, ...]] = {
             custom_configs=STATE_TRUE,
         ),
     ),
+    # Cat litter box
+    # https://developer.tuya.com/en/docs/iot/f?id=Kakg309qkmuit
+    "msp": (
+        LocalTuyaEntity(
+            id=DPCode.CLEANING_NUM,
+            name="Cleaning",
+            custom_configs=STATE_TRUE,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        LocalTuyaEntity(
+            id=DPCode.NOTIFICATION_STATUS,
+            name="Notification",
+            custom_configs=STATE_TRUE,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        LocalTuyaEntity(
+            id=DPCode.TRASH_STATUS,
+            name="Trash",
+            custom_configs=STATE_TRUE,
+            entity_category=EntityCategory.DIAGNOSTIC,
+        ),
+        LocalTuyaEntity(
+            id=DPCode.POWER,
+            name="Power",
+            device_class=BinarySensorDeviceClass.POWER,
+            custom_configs=STATE_TRUE,
+        ),
+        *FAULT_SENSOR,
+    ),
     # Door Window Sensor
     # https://developer.tuya.com/en/docs/iot/s?id=K9gf48hm02l8m
     "mcs": (
@@ -254,6 +309,15 @@ BINARY_SENSORS: dict[str, tuple[LocalTuyaEntity, ...]] = {
             custom_configs=STATE_TRUE,
         ),
         TAMPER_BINARY_SENSOR,
+    ),
+    # Access Control
+    # https://developer.tuya.com/en/docs/iot/s?id=Kb0o2xhlkxbet
+    "mk": (
+        LocalTuyaEntity(
+            id=DPCode.CLOSED_OPENED_KIT,
+            device_class=BinarySensorDeviceClass.LOCK,
+            custom_configs=ON_AQAB,
+        ),
     ),
     # Access Control
     # https://developer.tuya.com/en/docs/iot/s?id=Kb0o2xhlkxbet
@@ -410,8 +474,12 @@ BINARY_SENSORS: dict[str, tuple[LocalTuyaEntity, ...]] = {
             condition_contains_any=["tilt", "true"],
         ),
     ),
+    # EV Charcher
+    # https://developer.tuya.com/en/docs/iot/categoryqn?id=Kaiuz18kih0sm
+    "qccdz": (*FAULT_SENSOR,),
 }
 
+BINARY_SENSORS["gcj"] = FAULT_SENSOR
 BINARY_SENSORS["cl"] = FAULT_SENSOR
 BINARY_SENSORS["wk"] = FAULT_SENSOR
 BINARY_SENSORS["kg"] = FAULT_SENSOR
