@@ -32,7 +32,7 @@ from homeassistant.const import Platform, CONF_FRIENDLY_NAME, CONF_PLATFORM, CON
 import logging
 
 # Supported files
-from .alarm_control_panels import ALARMS  # not added yet
+# from .alarm_control_panels import ALARMS  # not added yet
 from .binary_sensors import BINARY_SENSORS
 from .buttons import BUTTONS
 from .climates import CLIMATES
@@ -52,7 +52,7 @@ from .water_heaters import WATER_HEATERS
 
 # The supported PLATFORMS [ Platform: Data ]
 DATA_PLATFORMS = {
-    Platform.ALARM_CONTROL_PANEL: ALARMS,
+    # Platform.ALARM_CONTROL_PANEL: ALARMS,
     Platform.BINARY_SENSOR: BINARY_SENSORS,
     Platform.BUTTON: BUTTONS,
     Platform.CLIMATE: CLIMATES,
