@@ -2,7 +2,7 @@
 
 from . import *
 import math
-from custom_components.localtuya.fan import LocalTuyaFan, DOMAIN as PLATFORM_DOMAIN
+from custom_components.localtuya_custom.fan import LocalTuyaFan, DOMAIN as PLATFORM_DOMAIN
 from homeassistant.util.percentage import (
     int_states_in_range,
     ordered_list_item_to_percentage,

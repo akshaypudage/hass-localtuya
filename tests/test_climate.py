@@ -2,7 +2,7 @@
 
 from . import *
 import copy
-from custom_components.localtuya.climate import (
+from custom_components.localtuya_custom.climate import (
     LocalTuyaClimate,
     HVACAction,
     HVACMode,

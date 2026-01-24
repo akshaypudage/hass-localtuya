@@ -1,7 +1,7 @@
 """Test for localtuya."""
 
 from . import *
-from custom_components.localtuya.light import (
+from custom_components.localtuya_custom.light import (
     LocalTuyaLight,
     DOMAIN as PLATFORM_DOMAIN,
     ColorMode,

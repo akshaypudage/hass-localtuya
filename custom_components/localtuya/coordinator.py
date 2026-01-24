@@ -73,12 +73,8 @@ class TuyaDevice(TuyaListener, ContextualLogger):
         self._entry = entry
         self._hass_entry: HassLocalTuyaData = hass.data[DOMAIN][entry.entry_id]
         self._device_config = DeviceConfig(device_config.copy())
-<<<<<<< HEAD
-        self._dev_id = self._device_config.id
-=======
         self.id = self._device_config.id
         self.local_key = self._device_config.local_key
->>>>>>> upstream/master
 
         self._status = {}
         self._interface: TuyaProtocol = None

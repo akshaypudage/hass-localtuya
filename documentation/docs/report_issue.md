@@ -23,8 +23,8 @@ Add the below line into your `configuration.yaml` that located in HA config dire
 logger:
   default: warning
   logs:
-    custom_components.localtuya: debug
-    custom_components.localtuya.pytuya: debug
+    custom_components.localtuya_custom: debug
+    custom_components.localtuya_custom.pytuya: debug
 ```
 
 ### Enable device debug.

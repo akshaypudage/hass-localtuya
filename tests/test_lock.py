@@ -1,7 +1,7 @@
 """Test for localtuya."""
 
 from . import *
-from custom_components.localtuya.lock import LocalTuyaLock, DOMAIN as PLATFORM_DOMAIN
+from custom_components.localtuya_custom.lock import LocalTuyaLock, DOMAIN as PLATFORM_DOMAIN
 
 STATE_ON = "activated"
 CONFIG = {

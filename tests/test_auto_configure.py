@@ -1,9 +1,9 @@
 from . import *
-from custom_components.localtuya.core.ha_entities import (
+from custom_components.localtuya_custom.core.ha_entities import (
     gen_localtuya_entities,
     DATA_PLATFORMS,
 )
-from custom_components.localtuya.const import PLATFORMS
+from custom_components.localtuya_custom.const import PLATFORMS
 
 
 COVER_DEVICE_DATA = {

@@ -1,7 +1,7 @@
 """Test for localtuya."""
 
 from . import *
-from custom_components.localtuya.water_heater import (
+from custom_components.localtuya_custom.water_heater import (
     LocalTuyaWaterHeater,
     DOMAIN as PLATFORM_DOMAIN,
     CONF_TARGET_TEMPERATURE_DP,

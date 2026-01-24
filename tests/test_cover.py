@@ -1,7 +1,7 @@
 """Test for localtuya."""
 
 from . import *
-from custom_components.localtuya.cover import (
+from custom_components.localtuya_custom.cover import (
     LocalTuyaCover,
     DOMAIN as PLATFORM_DOMAIN,
     STATE_OPENING,

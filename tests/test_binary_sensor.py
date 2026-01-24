@@ -1,7 +1,7 @@
 """Test for localtuya."""
 
 from . import *
-from custom_components.localtuya.binary_sensor import (
+from custom_components.localtuya_custom.binary_sensor import (
     LocalTuyaBinarySensor,
     DOMAIN as PLATFORM_DOMAIN,
 )

@@ -1,7 +1,7 @@
 """Test for localtuya."""
 
 from . import *
-from custom_components.localtuya.remote import (
+from custom_components.localtuya_custom.remote import (
     LocalTuyaRemote,
     DOMAIN as PLATFORM_DOMAIN,
 )

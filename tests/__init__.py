@@ -11,10 +11,10 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from custom_components.localtuya import TuyaCloudApi
-from custom_components.localtuya import coordinator
-from custom_components.localtuya import entity
-from custom_components.localtuya.const import DOMAIN
+from custom_components.localtuya_custom import TuyaCloudApi
+from custom_components.localtuya_custom import coordinator
+from custom_components.localtuya_custom import entity
+from custom_components.localtuya_custom.const import DOMAIN
 
 HOST = "192.168.1.100"
 DEVICE_NAME = "device"

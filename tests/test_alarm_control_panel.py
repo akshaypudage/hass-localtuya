@@ -1,7 +1,7 @@
 """Test for localtuya."""
 
 from . import *
-from custom_components.localtuya.alarm_control_panel import (
+from custom_components.localtuya_custom.alarm_control_panel import (
     LocalTuyaAlarmControlPanel,
     DEFAULT_SUPPORTED_MODES,
     DOMAIN as PLATFORM_DOMAIN,
