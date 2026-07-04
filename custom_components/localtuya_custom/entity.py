@@ -180,6 +180,15 @@ class LocalTuyaEntity(RestoreEntity, pytuya.ContextualLogger):
                 self._loaded = True
                 self.connection_made()
 
+            _LOGGER.debug(
+                "Entity %s (%s) _update_handler: status=%s, last_status=%s, changed=%s",
+                self.name,
+                self._dp_id,
+                status,
+                last_status,
+                status != last_status,
+            )
+
             if status != last_status:
                 if status:
                     self.status_updated()
