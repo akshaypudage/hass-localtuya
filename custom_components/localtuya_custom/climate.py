@@ -526,7 +526,7 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
         await self._device.set_dp("{\"head\":\"010ed80000000000040014003e00ab00ca\",\"key1\":{\"data\":\"" + data +"\",\"data_type\":0,\"key\":\"" + key + "\"},\"devid\":\"\",\"ver\":\"3\",\"delay\":300,\"control\":\"send_ir\",\"v_devid\":\"" + self._device.dev_id + "\",\"key_num\":1}\t", 201)
         await asyncio.sleep(2)
         await self.turn_off_led()
-        new_states[self._hvac_mode_dp] = self._hvac_mode_set[hvac_mode]
+        new_states[self._hvac_mode_dp] = self._hvac_mode_set.to_tuya(hvac_mode)
         await self._device.set_dps(new_states)
 
     async def async_turn_on(self) -> None:
