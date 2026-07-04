@@ -478,7 +478,7 @@ async def async_setup_services(hass: HomeAssistant, entities: list[LocalTuyaRemo
                 "Ensure that the fields for Raw Base64 code or header/key are valid"
             )
 
-    hass.services.async_register("localtuya", "remote_add_code", _handle_add_key)
+    hass.services.async_register("localtuya_custom", "remote_add_code", _handle_add_key)
 
 
 async_setup_entry = partial(
