@@ -63,11 +63,21 @@ class LocalTuyaBinarySensor(LocalTuyaEntity, BinarySensorEntity):
         super().status_updated()
 
         state = str(self.dp_value(self._dp_id)).lower()
+        state_on_values = self._config[CONF_STATE_ON].lower().split(",")
         # users may set wrong on states, But we assume that must devices use this on states.
-        if state in self._config[CONF_STATE_ON].lower().split(","):
+        if state in state_on_values:
             self._is_on = True
         else:
             self._is_on = False
+
+        _LOGGER.debug(
+            "Binary sensor %s: dp_id=%s, state=%s, state_on_values=%s, is_on=%s",
+            self.name,
+            self._dp_id,
+            state,
+            state_on_values,
+            self._is_on,
+        )
 
         if self._reset_timer and self._is_on:
             if self._reset_timer_interval is not None:

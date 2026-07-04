@@ -588,6 +588,7 @@ class TuyaDevice(TuyaListener, ContextualLogger):
 
     def _dispatch_status(self):
         signal = f"localtuya_{self._device_config.id}"
+        _LOGGER.debug("Device %s dispatching status: %s", self._device_config.id, self._status)
         dispatcher_send(self.hass, signal, self._status)
 
     def _handle_event(self, old_status: dict, new_status: dict):
