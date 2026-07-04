@@ -107,6 +107,7 @@ class TuyaDevice(TuyaListener, ContextualLogger):
 
         dev = self._device_config
         self._friendly_name = dev.name
+        self._dev_id = dev.id
         self.set_logger(_LOGGER, dev.id, dev.enable_debug, dev.name)
 
         # This has to be done in case the device type is type_0d

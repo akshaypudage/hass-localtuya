@@ -659,12 +659,12 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
             await self.toggle_helper_button('input_boolean.living_room_ac_led', 'off')
 
     async def toggle_helper_button(self, button_name, state):
-        inputStateObject = self._device._hass.states.get(button_name)
+        inputStateObject = self._device.hass.states.get(button_name)
         inputState = inputStateObject.state
         inputAttributesObject = inputStateObject.attributes.copy()
         _LOGGER.error("OFF=", inputStateObject)
         if state != inputState:
-            self._device._hass.states.async_set(button_name, state, inputAttributesObject)
+            self._device.hass.states.async_set(button_name, state, inputAttributesObject)
 
     def get_key(self, **kwargs):
         mode = kwargs.get('mode', self.hvac_mode)
