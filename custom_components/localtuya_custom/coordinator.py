@@ -156,6 +156,10 @@ class TuyaDevice(TuyaListener, ContextualLogger):
     def dev_id(self):
         return self._dev_id
     
+    @property
+    def is_write_only(self):
+        return getattr(self, "_is_write_only", False)
+    
     # @property
     # def name(self):
     #     """Get name of Tuya entity."""
