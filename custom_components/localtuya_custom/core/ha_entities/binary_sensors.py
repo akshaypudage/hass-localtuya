@@ -345,7 +345,7 @@ BINARY_SENSORS: dict[str, tuple[LocalTuyaEntity, ...]] = {
         LocalTuyaEntity(
             id=(DPCode.PIR, DPCode.PIR_STATE),
             device_class=BinarySensorDeviceClass.MOTION,
-            custom_configs={CONF_STATE_ON: "pir"},
+            custom_configs={CONF_STATE_ON: "true,pir"},
         ),
         LocalTuyaEntity(
             id=DPCode.STA,
