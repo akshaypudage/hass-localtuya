@@ -63,6 +63,12 @@ class LocalTuyaBinarySensor(LocalTuyaEntity, BinarySensorEntity):
         super().status_updated()
 
         state = str(self.dp_value(self._dp_id)).lower()
+        _LOGGER.debug(
+            "Binary sensor %s: full config state_on=%s, dp_id=%s",
+            self.name,
+            self._config.get(CONF_STATE_ON),
+            self._dp_id,
+        )
         state_on_values = self._config[CONF_STATE_ON].lower().split(",")
         # users may set wrong on states, But we assume that must devices use this on states.
         if state in state_on_values:
