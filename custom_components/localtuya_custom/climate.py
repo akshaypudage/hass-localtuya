@@ -423,8 +423,32 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
 
     @property
     def current_temperature(self):
-        """Return the current temperature."""
+        """Return the current temperature.
+
+        When an external sensor entity is configured, it is read live on
+        every access so the display can never fall back to a stale
+        datapoint value, regardless of the update path taken.
+        """
+        if self._current_temperature_entity and self.hass:
+            sensor_state = self.hass.states.get(self._current_temperature_entity)
+            if sensor_state is not None:
+                try:
+                    return self._converted_sensor_temperature(sensor_state)
+                except (ValueError, TypeError):
+                    pass
         return self._current_temperature
+
+    def _converted_sensor_temperature(self, sensor_state) -> float:
+        """Return a temperature sensor reading in this entity's unit."""
+        sensor_value = float(sensor_state.state)
+        sensor_unit = sensor_state.attributes.get("unit_of_measurement")
+        if sensor_unit and sensor_unit != self._temperature_unit:
+            sensor_value = TemperatureConverter.convert(
+                sensor_value,
+                UnitOfTemperature(sensor_unit),
+                self._temperature_unit,
+            )
+        return sensor_value
 
     @property
     def target_temperature(self):
@@ -604,28 +628,17 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
 
         # Override current temperature from an external sensor entity when
         # configured (e.g. room TH sensor instead of the IR controller's own
-        # reading). Uses the entity's own hass instance, which HA always
-        # provides once the entity is added. The sensor value is converted
-        # into the climate entity's unit; a sensor without a unit is used
-        # as-is. A stale/unparsable sensor reading keeps the last known
-        # temperature instead of blanking the display.
+        # reading). Kept in sync here as well so internal consumers such as
+        # heuristic_action also run off room temperature.
         if self._current_temperature_entity and self.hass:
             sensor_state = self.hass.states.get(
                 self._current_temperature_entity
             )
             if sensor_state is not None:
                 try:
-                    sensor_value = float(sensor_state.state)
-                    sensor_unit = sensor_state.attributes.get(
-                        "unit_of_measurement"
+                    self._current_temperature = self._converted_sensor_temperature(
+                        sensor_state
                     )
-                    if sensor_unit and sensor_unit != self._temperature_unit:
-                        sensor_value = TemperatureConverter.convert(
-                            sensor_value,
-                            UnitOfTemperature(sensor_unit),
-                            self._temperature_unit,
-                        )
-                    self._current_temperature = sensor_value
                 except (ValueError, TypeError):
                     _LOGGER.debug(
                         "Ignoring non-numeric temperature from %s: %s",
