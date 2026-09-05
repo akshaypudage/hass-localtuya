@@ -37,6 +37,7 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.util.unit_system import US_CUSTOMARY_SYSTEM
+from homeassistant.util.unit_conversion import TemperatureConverter
 from .entity import LocalTuyaEntity, async_setup_entry
 from .const import (
     CONF_CURRENT_TEMPERATURE_DP,
@@ -603,16 +604,27 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
 
         # Override current temperature from an external sensor entity when
         # configured (e.g. room TH sensor instead of the IR controller's own
-        # reading). Values are used as-is: keep the sensor and the climate
-        # entity in the same unit. A stale/unparsable sensor reading keeps
-        # the last known temperature instead of blanking the display.
+        # reading). The sensor value is converted into the climate entity's
+        # unit; a sensor without a unit is used as-is. A stale/unparsable
+        # sensor reading keeps the last known temperature instead of
+        # blanking the display.
         if self._current_temperature_entity and self._device.hass:
             sensor_state = self._device.hass.states.get(
                 self._current_temperature_entity
             )
             if sensor_state is not None:
                 try:
-                    self._current_temperature = float(sensor_state.state)
+                    sensor_value = float(sensor_state.state)
+                    sensor_unit = sensor_state.attributes.get(
+                        "unit_of_measurement"
+                    )
+                    if sensor_unit and sensor_unit != self._temperature_unit:
+                        sensor_value = TemperatureConverter.convert(
+                            sensor_value,
+                            UnitOfTemperature(sensor_unit),
+                            self._temperature_unit,
+                        )
+                    self._current_temperature = sensor_value
                 except (ValueError, TypeError):
                     _LOGGER.debug(
                         "Ignoring non-numeric temperature from %s: %s",
