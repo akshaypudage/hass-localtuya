@@ -6,7 +6,11 @@ from enum import StrEnum
 import logging
 from functools import partial
 from .config_flow import col_to_select
-from homeassistant.helpers.selector import ObjectSelector
+from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
+    ObjectSelector,
+)
 
 import voluptuous as vol
 from homeassistant.components.climate import (
@@ -36,6 +40,7 @@ from homeassistant.util.unit_system import US_CUSTOMARY_SYSTEM
 from .entity import LocalTuyaEntity, async_setup_entry
 from .const import (
     CONF_CURRENT_TEMPERATURE_DP,
+    CONF_CURRENT_TEMPERATURE_ENTITY,
     CONF_ECO_DP,
     CONF_ECO_VALUE,
     CONF_HEURISTIC_ACTION,
@@ -134,6 +139,9 @@ def flow_schema(dps):
     return {
         vol.Optional(CONF_TARGET_TEMPERATURE_DP): col_to_select(dps, is_dps=True),
         vol.Optional(CONF_CURRENT_TEMPERATURE_DP): col_to_select(dps, is_dps=True),
+        vol.Optional(CONF_CURRENT_TEMPERATURE_ENTITY): EntitySelector(
+            EntitySelectorConfig(domain="sensor", device_class="temperature")
+        ),
         vol.Optional(CONF_TEMPERATURE_STEP): col_to_select(
             [PRECISION_WHOLE, PRECISION_HALVES, PRECISION_TENTHS]
         ),
@@ -213,6 +221,11 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
         self._precision = float(self._config.get(CONF_PRECISION, DEFAULT_PRECISION))
         self._precision_target = float(
             self._config.get(CONF_TARGET_PRECISION, DEFAULT_PRECISION)
+        )
+        # Optional external temperature sensor (e.g. a room TH sensor) used
+        # in place of the device's own current-temperature datapoint.
+        self._current_temperature_entity = self._config.get(
+            CONF_CURRENT_TEMPERATURE_ENTITY
         )
 
         # HVAC Modes
@@ -587,6 +600,25 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
             self._target_temperature = f_to_c(self._target_temperature)
         elif self._target_temp_forced_to_celsius is False:
             self._current_temperature = f_to_c(self._current_temperature)
+
+        # Override current temperature from an external sensor entity when
+        # configured (e.g. room TH sensor instead of the IR controller's own
+        # reading). Values are used as-is: keep the sensor and the climate
+        # entity in the same unit. A stale/unparsable sensor reading keeps
+        # the last known temperature instead of blanking the display.
+        if self._current_temperature_entity and self._device.hass:
+            sensor_state = self._device.hass.states.get(
+                self._current_temperature_entity
+            )
+            if sensor_state is not None:
+                try:
+                    self._current_temperature = float(sensor_state.state)
+                except (ValueError, TypeError):
+                    _LOGGER.debug(
+                        "Ignoring non-numeric temperature from %s: %s",
+                        self._current_temperature_entity,
+                        sensor_state.state,
+                    )
 
         # Update preset states
         if self._has_presets:

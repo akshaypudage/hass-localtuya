@@ -132,6 +132,7 @@ CONF_STATE_CLASS = "state_class"
 # climate
 CONF_TARGET_TEMPERATURE_DP = "target_temperature_dp"
 CONF_CURRENT_TEMPERATURE_DP = "current_temperature_dp"
+CONF_CURRENT_TEMPERATURE_ENTITY = "current_temperature_entity"
 CONF_TEMPERATURE_STEP = "temperature_step"
 CONF_MIN_TEMP = "min_temperature"
 CONF_MAX_TEMP = "max_temperature"
