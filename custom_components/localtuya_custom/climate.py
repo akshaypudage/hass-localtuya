@@ -228,6 +228,10 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
         self._current_temperature_entity = self._config.get(
             CONF_CURRENT_TEMPERATURE_ENTITY
         )
+        _LOGGER.error(
+            "CLIMATE PATCH 16e2d21-plus init: entity_config has sensor override=%s",
+            self._current_temperature_entity,
+        )
 
         # HVAC Modes
         self._hvac_mode_dp = self._config.get(CONF_HVAC_MODE_DP)
