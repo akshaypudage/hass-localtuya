@@ -427,13 +427,17 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
 
         When an external sensor entity is configured, it is read live on
         every access so the display can never fall back to a stale
-        datapoint value, regardless of the update path taken.
+        datapoint value, regardless of the update path taken. If the
+        sensor is momentarily unreadable, the last good sensor reading
+        is kept instead of flipping back to the controller value.
         """
         if self._current_temperature_entity and self.hass:
             sensor_state = self.hass.states.get(self._current_temperature_entity)
             if sensor_state is not None:
                 try:
-                    return self._converted_sensor_temperature(sensor_state)
+                    self._current_temperature = self._converted_sensor_temperature(
+                        sensor_state
+                    )
                 except (ValueError, TypeError):
                     pass
         return self._current_temperature
