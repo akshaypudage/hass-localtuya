@@ -11,6 +11,7 @@ from homeassistant.helpers.selector import (
     EntitySelectorConfig,
     ObjectSelector,
 )
+from homeassistant.helpers.event import async_track_state_change_event
 
 import voluptuous as vol
 from homeassistant.components.climate import (
@@ -595,6 +596,27 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
 
         preset_value = self._preset_set.to_tuya(preset_mode)
         await self._device.set_dp(preset_value, self._preset_dp)
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to the external temperature sensor, if configured.
+
+        The climate entity otherwise only re-renders on its own device
+        updates, so a room sensor ticking away would never refresh the
+        display until the next interaction or device poll.
+        """
+        await super().async_added_to_hass()
+        if self._current_temperature_entity:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass,
+                    [self._current_temperature_entity],
+                    self._external_temperature_changed,
+                )
+            )
+
+    async def _external_temperature_changed(self, event) -> None:
+        """Refresh the display when the external temperature sensor updates."""
+        self.async_write_ha_state()
 
     def connection_made(self):
         """The connection has made with the device and status retrieved. configure entity based on it."""
