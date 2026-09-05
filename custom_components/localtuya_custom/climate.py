@@ -604,10 +604,12 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
 
         # Override current temperature from an external sensor entity when
         # configured (e.g. room TH sensor instead of the IR controller's own
-        # reading). The sensor value is converted into the climate entity's
-        # unit; a sensor without a unit is used as-is. A stale/unparsable
-        # sensor reading keeps the last known temperature instead of
-        # blanking the display.
+        # reading). TEMP DEBUG - remove after verification.
+        _LOGGER.error(
+            "TEMP OVERRIDE check: entity=%s hass=%s",
+            self._current_temperature_entity,
+            self._device.hass is not None,
+        )
         if self._current_temperature_entity and self._device.hass:
             sensor_state = self._device.hass.states.get(
                 self._current_temperature_entity
@@ -625,9 +627,14 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
                             self._temperature_unit,
                         )
                     self._current_temperature = sensor_value
+                    _LOGGER.error(
+                        "TEMP OVERRIDE applied: %s -> %s",
+                        self._current_temperature_entity,
+                        self._current_temperature,
+                    )
                 except (ValueError, TypeError):
-                    _LOGGER.debug(
-                        "Ignoring non-numeric temperature from %s: %s",
+                    _LOGGER.error(
+                        "TEMP OVERRIDE bad value from %s: %s",
                         self._current_temperature_entity,
                         sensor_state.state,
                     )
