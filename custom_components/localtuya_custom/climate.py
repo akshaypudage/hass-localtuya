@@ -135,6 +135,13 @@ MODE_WAIT = 0.1
 
 FAN_SPEEDS_DEFAULT = {"1": "Low", "2": "Medium", "3": "High"}
 
+# Experimental IR fan-speed codes (Sx suffix in IR keys). S0 is auto (the
+# only variant captured so far); S1/S2/S3 are derived by swapping the S
+# nibble of the S0 twin while keeping its checksum. If the AC ignores
+# these frames, the checksum covers S and the codes must be learned from
+# the original remote instead.
+FAN_SPEED_TO_CODE = {"auto": "0", "low": "1", "middle": "2", "high": "3"}
+
 
 def flow_schema(dps):
     """Return schema used in config flow."""
