@@ -549,6 +549,29 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
             self._fan_speeds.to_tuya(fan_mode), self._fan_speed_dp
         )
 
+        # Experimental: the controller DPS alone does not change the fan on
+        # the AC unit itself - it also needs the speed in the IR frame.
+        # Only cool/heat have Sx IR keys; other modes keep DPS-only behavior.
+        # A speed of auto (S0) reproduces today's frames byte-for-byte.
+        speed_code = FAN_SPEED_TO_CODE.get(str(fan_mode).lower(), "0")
+        if (
+            speed_code != "0"
+            and self.hvac_mode in (HVACMode.COOL, HVACMode.HEAT)
+            and self.target_temperature is not None
+        ):
+            key = self.get_key(
+                mode=self.hvac_mode,
+                temperature=self.target_temperature,
+                speed=speed_code,
+            )
+            data = self.get_ir_data(key)
+            _LOGGER.error("Setting fan key= ", key)
+            await self.turn_on_led()
+            await asyncio.sleep(1)
+            await self._device.set_dp("{\"head\":\"010ed80000000000040014003e00ab00ca\",\"key1\":{\"data\":\"" + data +"\",\"data_type\":0,\"key\":\"" + key + "\"},\"devid\":\"\",\"ver\":\"3\",\"delay\":300,\"control\":\"send_ir\",\"v_devid\":\"" + self._device.dev_id + "\",\"key_num\":1}\t", 201)
+            await asyncio.sleep(1)
+            await self.turn_off_led()
+
     async def async_set_hvac_mode(self, hvac_mode: HVACMode):
         """Set new target operation mode."""
         new_states = {}
@@ -765,11 +788,25 @@ class LocalTuyaClimate(LocalTuyaEntity, ClimateEntity):
         if self.hvac_mode is not 'fan_only':
             key = key + "_" + "T" + str(round(temperature))
         if self.hvac_mode != 'auto' and self.hvac_mode != 'dry':
-            key = key + "_" + "S" + str(0)
+            key = key + "_" + "S" + str(kwargs.get('speed', 0))
         _LOGGER.error("on=",key)
         return key
     
     def get_ir_data(self, key):
+        # Experimental fan-speed variants (S1=Low, S2=Middle, S3=High).
+        # Derived from the S0 twin by swapping the S nibble that follows
+        # the temperature code, keeping the twin's checksum. If the AC
+        # ignores these frames, the checksum covers S and the codes must
+        # be learned from the original remote instead.
+        fan_variant = re.match(r"^(M[01]_T\d+)_S([123])$", key)
+        if fan_variant:
+            twin_data = self.get_ir_data(fan_variant.group(1) + "_S0")
+            return re.sub(
+                r"(DBF4[0-9A-F]{2})[0-9A-F]",
+                r"\g<1>" + fan_variant.group(2),
+                twin_data,
+                count=1,
+            )
         data = '02$$0030B24DBF407C83@%'
         match key:
             case 'M4_T17':
