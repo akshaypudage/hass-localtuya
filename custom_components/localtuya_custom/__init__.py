@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import dataclass
+import json
 import logging
 import time
 from datetime import timedelta
@@ -93,10 +94,15 @@ async def async_setup(hass: HomeAssistant, config: dict):
         if not device.connected:
             raise HomeAssistantError("not connected to device")
         value = event.data[CONF_VALUE]
-        if isinstance(value, dict):
+        dp = event.data.get(CONF_DP)
+        if dp is None:
+            if not isinstance(value, dict):
+                raise HomeAssistantError("dp is required when value is not a dict")
             await device.set_dps(value)
         else:
-            await device.set_dp(value, event.data[CONF_DP])
+            if isinstance(value, dict):
+                value = json.dumps(value, separators=(",", ":"))
+            await device.set_dp(value, dp)
 
     def _device_discovered(device: dict):
         """Update address of device if it has changed."""
